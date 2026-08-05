@@ -1,0 +1,11 @@
+## Interface: 30300
+## Title: BisBuddy
+## Notes: BisBeard (coa.bisbeard.com) BiS ranks and upgrade hints on tooltips and loot drops. Type /bb
+## Author: Leemo
+## Version: 1.9.0-dev
+## SavedVariables: BisBuddyDB
+
+Data.lua
+Extras.lua
+TalentData.lua
+BisBuddy.lua

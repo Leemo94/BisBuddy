@@ -1,0 +1,8 @@
+# bisbeard chunk cache (re-downloads only changed chunks on next regen)
+tools/generator/.chunkcache/
+# build artifacts (produced by build-bisbuddy.sh)
+*.zip
+# os / python cruft
+.DS_Store
+__pycache__/
+*.pyc
