@@ -235,7 +235,7 @@ end
 local WEIGHT_STATS = {
 	{ "intellect", "Intellect" }, { "strength", "Strength" }, { "agility", "Agility" },
 	{ "stamina", "Stamina" }, { "spirit", "Spirit" },
-	{ "spellPower", "Spell Power" }, { "spellDamage", "Spell Damage" }, { "healingPower", "Healing Power" },
+	{ "spellPower", "Spell Power" }, { "spellDamage", "Spell Damage" }, { "healingPower", "Healing Power" }, { "spellPenetration", "Spell Pen" },
 	{ "critRating", "Crit" }, { "hasteRating", "Haste" }, { "hitRating", "Hit" }, { "expertise", "Expertise" },
 	{ "attackPower", "Attack Power" }, { "rangedAttackPower", "Ranged AP" }, { "armorPenetration", "Armor Pen" },
 	{ "weaponDps", "Weapon DPS" }, { "rangedDps", "Ranged DPS" },
@@ -299,7 +299,7 @@ local SOURCE_BUCKETS = {   -- display order in the Sources panel
 	{ "vendor", "Vendor" },
 	{ "events", "Events" },
 }
-local SOURCE_CATEGORY_BUCKET = {
+SOURCE_BUCKETS.cat = {
 	raid = "raid", dungeon = "dungeon", worldforged = "worldforged",
 	bloodforged = "bloodforged", worldboss = "worldboss", worldboe = "worldboss",
 	pvp = "pvp", reputation = "reputation", quests = "quest",
@@ -312,7 +312,7 @@ local function IsExcludedItem(itemId)
 		return false
 	end
 	if db.sources then
-		local bucket = info[8] and SOURCE_CATEGORY_BUCKET[info[8]]
+		local bucket = info[8] and SOURCE_BUCKETS.cat[info[8]]
 		if bucket and db.sources[bucket] == false then
 			return true
 		end
@@ -380,6 +380,7 @@ end
 -- Merge every (phase <= db.phase, tier <= db.maxDiff) cell per slot, drop
 -- excluded items, sort by score and assign ranks. The top of each merged slot
 -- list is the exact cumulative BiS for the current caps (see generator note).
+local CanUseByType   -- forward decl (defined with the proficiency helpers below)
 local function BuildRankIndex()
 	wipe(rankIndex)
 	wipe(activeSlotRanks)
@@ -390,24 +391,41 @@ local function BuildRankIndex()
 	end
 	local isCustom = IsSpecCustom()
 	local bySlot = {}
-	for phase = 1, db.phase do
-		local pcells = cells[phase]
-		if pcells then
-			for tier = 1, db.maxDiff do
-				local tcells = pcells[tier]
-				if tcells then
-					for slot, list in pairs(tcells) do
-						local acc = bySlot[slot]
-						if not acc then
-							acc = {}
-							bySlot[slot] = acc
-						end
-						for i = 1, #list do
-							local id = list[i][1]
-							if not IsExcludedItem(id) then
-								-- baked score by default; recompute from raw stats when custom
-								local sc = isCustom and CustomScore(id, slot, specWeights) or list[i][2]
-								acc[#acc + 1] = { id, sc }
+	if isCustom and D.slotPool then
+		-- CUSTOM weights: rank the WIDE pool of every item your class can use,
+		-- scored by your weights - so an edit actually surfaces new gear, not just
+		-- re-orders bisbeard's curated picks. (Filtered by phase/tier/sources/prof.)
+		for slot, ids in pairs(D.slotPool) do
+			local acc = {}
+			for i = 1, #ids do
+				local id = ids[i]
+				local info = D.items[id]
+				if info and (info[4] or 1) <= db.phase and (info[5] or 1) <= db.maxDiff
+					and not IsExcludedItem(id) and CanUseByType(info[9], slot) then
+					acc[#acc + 1] = { id, CustomScore(id, slot, specWeights) }
+				end
+			end
+			bySlot[slot] = acc
+		end
+	else
+		-- DEFAULT weights: bisbeard's curated per-cell BiS (fast + exact).
+		for phase = 1, db.phase do
+			local pcells = cells[phase]
+			if pcells then
+				for tier = 1, db.maxDiff do
+					local tcells = pcells[tier]
+					if tcells then
+						for slot, list in pairs(tcells) do
+							local acc = bySlot[slot]
+							if not acc then
+								acc = {}
+								bySlot[slot] = acc
+							end
+							for i = 1, #list do
+								local id = list[i][1]
+								if not IsExcludedItem(id) then
+									acc[#acc + 1] = { id, list[i][2] }
+								end
 							end
 						end
 					end
@@ -891,7 +909,9 @@ end
 -- Can the active spec actually equip this item? (weapon type / armor type /
 -- shield). Mirrors the generator so hovered/dropped gear the spec can't use
 -- isn't scored. Defaults to allow when data or item info is unavailable.
-local function CanUseItem(link)
+-- Proficiency from a baked item type + known slot (no GetItemInfo needed) - used
+-- to filter the wide slotPool for custom-weight re-ranking. CanUseItem wraps it.
+CanUseByType = function(subType, slot)
 	if not specKey or not D.prof or not D.prof.classes then
 		return true
 	end
@@ -900,11 +920,6 @@ local function CanUseItem(link)
 	if not cp then
 		return true
 	end
-	local _, _, _, _, _, _, subType, _, equipLoc = GetItemInfo(link)
-	if not equipLoc then
-		return true -- item not in the client cache yet; don't over-filter
-	end
-	local slot = EQUIPLOC_TO_SLOT[equipLoc]
 	if not slot then
 		return true
 	end
@@ -939,6 +954,14 @@ local function CanUseItem(link)
 		return true
 	end
 	return true
+end
+
+local function CanUseItem(link)
+	local _, _, _, _, _, _, subType, _, equipLoc = GetItemInfo(link)
+	if not equipLoc then
+		return true -- item not in the client cache yet; don't over-filter
+	end
+	return CanUseByType(subType, EQUIPLOC_TO_SLOT[equipLoc])
 end
 
 local function EquippedScore(invSlot)
@@ -1705,6 +1728,16 @@ local function RefreshWeightsPanel()
 	else
 		weightsPanel.subtitle:SetText("bisbeard defaults - edit any field to customize")
 	end
+	local caps = specKey and CAP.spec[specKey]
+	if caps and (caps.hit or caps.exp) then
+		local parts = {}
+		if caps.hit then parts[#parts + 1] = format("%s hit %d", caps.hit, CAP[caps.hit] or 0) end
+		if caps.exp then parts[#parts + 1] = format("expertise %d", CAP.exp) end
+		weightsPanel.capLine:SetText("|cffffcc55Raid caps:|r " .. table.concat(parts, "  |cff666666/|r  ") ..
+			"  |cff808080(rating - gear hit/exp counts only up to the cap)|r")
+	else
+		weightsPanel.capLine:SetText("|cff808080No hit/expertise cap for this spec (raid content)|r")
+	end
 	for _, row in ipairs(weightsPanel.rows) do
 		local overridden = custom and custom[row.key] ~= nil
 		local eff = (overridden and custom[row.key]) or base[row.key] or 0
@@ -1858,7 +1891,7 @@ local function CreateWeightsPanel()
 	end
 	local f = CreateFrame("Frame", "BisBuddyWeightsFrame", UIParent)
 	f:SetWidth(474)
-	f:SetHeight(392)
+	f:SetHeight(416)
 	f:SetPoint("CENTER")
 	f:SetFrameStrata("DIALOG")
 	StyleDialog(f)
@@ -1944,6 +1977,10 @@ local function CreateWeightsPanel()
 	local note = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 	note:SetPoint("BOTTOM", 0, 44)
 	note:SetText("Type a number, press Enter. Blank = bisbeard default. Import/Export share weights as a string.")
+
+	f.capLine = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	f.capLine:SetPoint("BOTTOM", 0, 64)
+	f.capLine:SetWidth(450)
 
 	f:Hide() -- created hidden so the first /bb weights opens it
 	weightsPanel = f
@@ -2214,14 +2251,16 @@ local function CreateMainPanel()
 
 	local function rowLabel(text, y)
 		local fs = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-		fs:SetPoint("TOPLEFT", 20, y)
+		fs:SetPoint("TOPLEFT", 12, y)
+		fs:SetWidth(64)             -- fixed column, right-justified so labels sit just
+		fs:SetJustifyH("RIGHT")     -- left of the dropdowns and never overlap them
 		fs:SetText(text)
 	end
 
 	-- Spec: nested class -> spec dropdown
 	rowLabel("Spec", -66)
 	f.specDD = MakeDropdown(f, "BisBuddySpecDropDown", 210)
-	f.specDD:SetPoint("TOPLEFT", 62, -60)
+	f.specDD:SetPoint("TOPLEFT", 80, -60)
 	f.specDD:SetBuilder(function(add)
 		local dd = f.specDD
 		if not dd.navState then                          -- level 1: pick a class
@@ -2245,7 +2284,7 @@ local function CreateMainPanel()
 	-- Phase dropdown
 	rowLabel("Phase", -104)
 	f.phaseDD = MakeDropdown(f, "BisBuddyPhaseDropDown", 210)
-	f.phaseDD:SetPoint("TOPLEFT", 62, -98)
+	f.phaseDD:SetPoint("TOPLEFT", 80, -98)
 	f.phaseDD:SetBuilder(function(add)
 		for p = 1, (D.maxPhase or 5) do
 			local n = p
@@ -2256,7 +2295,7 @@ local function CreateMainPanel()
 	-- Max difficulty dropdown
 	rowLabel("Max diff", -142)
 	f.diffDD = MakeDropdown(f, "BisBuddyDiffDropDown", 210)
-	f.diffDD:SetPoint("TOPLEFT", 62, -136)
+	f.diffDD:SetPoint("TOPLEFT", 80, -136)
 	f.diffDD:SetBuilder(function(add)
 		for d = 1, (D.maxDiff or 5) do
 			local n = d
@@ -2664,8 +2703,9 @@ RenderBrowse = function()
 	f.slotDD:SetText(browseSlot and (BROWSE_SLOT_LABEL[browseSlot] or browseSlot) or "no data")
 
 	if specKey then
-		f.header:SetText(format("|cffffd100%s|r  -  phase %d %s, up to %s",
-			(strmatch(specKey, "|(.+)$") or specKey), db.phase, PhaseLabel(db.phase), DiffLabel(db.maxDiff)))
+		local tag = IsSpecCustom() and "   |cffcc66ff(custom weights - /bb weights to reset)|r" or ""
+		f.header:SetText(format("|cffffd100%s|r  -  phase %d %s, up to %s%s",
+			(strmatch(specKey, "|(.+)$") or specKey), db.phase, PhaseLabel(db.phase), DiffLabel(db.maxDiff), tag))
 	else
 		f.header:SetText("|cffff2020No spec set|r - open BisBuddy (/bb) and pick your spec first.")
 	end

@@ -392,7 +392,8 @@ def build(weights, items, topn, prof=None, max_phase_cap=None):
                     src = (it.get("source") or "?")[:60]
                     pool[iid] = (it.get("name") or "?", it.get("version") or "", src,
                                  iphase, difficulty_tier(it), item_category(it),
-                                 coded_stats(it), it.get("sourceCategory") or "")
+                                 coded_stats(it), it.get("sourceCategory") or "",
+                                 it.get("type") or "")
         cells[spec] = spec_cells
     return cells, pool, phases, skipped_class
 
@@ -466,16 +467,34 @@ def emit_lua(out_path, manifest, weights, cells, pool, phases, total_items, prof
     # weightable stats (+ "dps"), used only for local weight-override re-ranking.
     # The 8th field is bisbeard's sourceCategory (raid/dungeon/worldforged/rep/
     # quest/crafting/...), grouped by the addon into the Sources filter buckets.
+    # The 9th field is bisbeard's item type (Cloth/Plate/Swords/...), used with the
+    # baked proficiency to filter the wide slotPool for custom-weight re-ranking.
     ids = sorted(pool)
     BATCH = 1500
     for start in range(0, len(ids), BATCH):
         push("do local t = (function() return {")
         for iid in ids[start:start + BATCH]:
-            n, v, src, ph, tier, cat, stats, scat = pool[iid]
+            n, v, src, ph, tier, cat, stats, scat, typ = pool[iid]
             statstr = "{" + ",".join("%s=%g" % (c, val) for c, val in sorted(stats.items())) + "}"
-            push("  [%d] = {%s,%s,%s,%d,%d,%d,%s,%s}," % (
-                iid, lua_str(n), lua_str(v), lua_str(src), ph, tier, cat, statstr, lua_str(scat)))
+            push("  [%d] = {%s,%s,%s,%d,%d,%d,%s,%s,%s}," % (
+                iid, lua_str(n), lua_str(v), lua_str(src), ph, tier, cat, statstr, lua_str(scat), lua_str(typ)))
         push("} end)() for k, v in pairs(t) do BisBuddyData.items[k] = v end end")
+    # per-slot candidate pool (spec-agnostic): every pooled item grouped by slot, so
+    # the addon can rank the WIDE usable pool when the user sets custom weights
+    # (default weights still use bisbeard's curated cells; proficiency is applied in
+    # the addon from each item's baked type = items[id][9]).
+    slot_pool = {}
+    for spec_cells in cells.values():
+        for phase_map in spec_cells.values():
+            for tier_map in phase_map.values():
+                for slot, rows in tier_map.items():
+                    bucket = slot_pool.setdefault(slot, set())
+                    for iid, _s in rows:
+                        bucket.add(iid)
+    push("BisBuddyData.slotPool = {}")
+    for slot in sorted(slot_pool):
+        push("BisBuddyData.slotPool[%s] = {%s}" % (
+            lua_str(slot), ",".join(str(i) for i in sorted(slot_pool[slot]))))
     # enchants: { {name, slot, {statcode=val,...}}, ... } - scored at runtime by
     # the active spec's weights (same stat codes as items[id][7]).
     if enchants:

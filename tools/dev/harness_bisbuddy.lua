@@ -569,13 +569,47 @@ local function hCustomScore(id, slot, w)
 	end
 	return s
 end
+-- proficiency mirror of the addon's CanUseByType (baked prof + item type field 9)
+local function hCanUse(spec, typ, slot)
+	local cp = BisBuddyData.prof.classes[spec:match("^(.-)|")]
+	if not cp then return true end
+	local ARM = { Cloth=1, Leather=1, Mail=1, Plate=1 }
+	local ASLOT = { Head=1, Shoulders=1, Chest=1, Wrists=1, Hands=1, Waist=1, Legs=1, Feet=1 }
+	local WSLOT = { ["One-Hand"]=1, ["Two-Hand"]=1, ["Main Hand"]=1, ["Off Hand"]=1, Ranged=1 }
+	local WMAP = { Swords="Sword", ["One-Handed Swords"]="Sword", ["Two-Handed Swords"]="Sword",
+		Daggers="Dagger", Axes="Axe", ["Two-Handed Axes"]="Axe", Maces="Mace", ["Two-Handed Maces"]="Mace",
+		["Fist Weapons"]="Fist", Staves="Staff", Polearms="Polearm", Wands="Wand", Wand="Wand",
+		Bows="Bow", Guns="Gun", Crossbows="Crossbow", Thrown="Thrown" }
+	local function has(l, v)
+		if l then for _, x in ipairs(l) do if x == v then return true end end end
+		return false
+	end
+	if slot == "Shield" then return cp.shield and true or false end
+	if ASLOT[slot] and ARM[typ] then return has(cp.armor, typ) end
+	if WSLOT[slot] then
+		local wt = WMAP[typ]; if not wt then return false end
+		if not has(cp.weap, wt) then return false end
+		if (slot=="One-Hand" or slot=="Main Hand" or slot=="Off Hand") and has(cp.no1, wt) then return false end
+		if slot=="Two-Hand" and has(cp.no2, wt) then return false end
+		return true
+	end
+	return true
+end
 -- baked stats present?
 check(type(BisBuddyData.items[topStaffId][7]) == "table", "pool items carry baked raw stats (field 7)")
 -- effective = bisbeard Invention merged with a huge stamina override
+SlashCmdList["BISBUDDY"]("phase 5"); SlashCmdList["BISBUDDY"]("diff ascended")  -- fix caps: phase<=5, tier<=4
 local effW = {}; for k,v in pairs(BisBuddyData.weights["Tinker|Invention"]) do effW[k]=v end
 effW.stamina = 1000
--- independently compute the expected #1 Two-Hand under those weights
-local pool2h = mergeTop("Tinker|Invention", 5, 4, "Two-Hand", false)
+-- expected #1 Two-Hand from the WIDE usable pool (what the addon ranks when weights
+-- are custom), not just bisbeard's curated cells
+local pool2h = {}
+for _, id in ipairs(BisBuddyData.slotPool["Two-Hand"] or {}) do
+	local info = BisBuddyData.items[id]
+	if info and (info[4] or 1) <= 5 and (info[5] or 1) <= 4 and hCanUse("Tinker|Invention", info[9], "Two-Hand") then
+		pool2h[#pool2h + 1] = { id }
+	end
+end
 local expId, expScore = nil, -1
 for _, e in ipairs(pool2h) do local s = hCustomScore(e[1], "Two-Hand", effW); if s > expScore then expScore, expId = s, e[1] end end
 check(expId ~= nil and expId ~= topStaffId, "stamina=1000 override predicts a NEW #1 (not the bisbeard staff)")
