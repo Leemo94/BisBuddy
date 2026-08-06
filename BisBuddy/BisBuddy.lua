@@ -1903,7 +1903,6 @@ local function CreateWeightsPanel()
 	f:RegisterForDrag("LeftButton")
 	f:SetScript("OnDragStart", f.StartMoving)
 	f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing(); SavePanelPos(self) end)
-	UISpecialFrames = UISpecialFrames or {}
 	tinsert(UISpecialFrames, "BisBuddyWeightsFrame") -- Esc closes
 
 	f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
@@ -2041,7 +2040,6 @@ local function CreateSourcesPanel()
 	f:RegisterForDrag("LeftButton")
 	f:SetScript("OnDragStart", f.StartMoving)
 	f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing(); SavePanelPos(self) end)
-	UISpecialFrames = UISpecialFrames or {}
 	tinsert(UISpecialFrames, "BisBuddySourcesFrame") -- Esc closes
 
 	f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
@@ -2116,7 +2114,8 @@ local function PopupEditBox(self)
 	return (self.editBox) or _G[(self:GetName() or "") .. "EditBox"]
 end
 
-StaticPopupDialogs = StaticPopupDialogs or {}
+-- NB: never write the StaticPopupDialogs/UISpecialFrames GLOBAL (taints secure UI at
+-- load); only ADD our own keys to the existing Blizzard tables (safe, standard).
 StaticPopupDialogs["BISBUDDY_IMPORT"] = {
 	text = "Paste a BisBuddy / GearWeights weight string, then Import:",
 	button1 = "Import",
@@ -2239,7 +2238,6 @@ local function CreateMainPanel()
 	f:RegisterForDrag("LeftButton")
 	f:SetScript("OnDragStart", f.StartMoving)
 	f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing(); SavePanelPos(self) end)
-	UISpecialFrames = UISpecialFrames or {}
 	tinsert(UISpecialFrames, "BisBuddyFrame")
 
 	f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
@@ -2501,7 +2499,6 @@ local function CreateTalentsPanel()
 	f:RegisterForDrag("LeftButton")
 	f:SetScript("OnDragStart", f.StartMoving)
 	f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing(); SavePanelPos(self) end)
-	UISpecialFrames = UISpecialFrames or {}
 	tinsert(UISpecialFrames, "BisBuddyTalentsFrame")
 	f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 	f.title:SetPoint("TOP", 0, -14)
@@ -2805,7 +2802,6 @@ local function CreateBrowsePanel()
 	f:RegisterForDrag("LeftButton")
 	f:SetScript("OnDragStart", f.StartMoving)
 	f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing(); SavePanelPos(self) end)
-	UISpecialFrames = UISpecialFrames or {}
 	tinsert(UISpecialFrames, "BisBuddyBrowseFrame")
 
 	f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
@@ -3016,7 +3012,6 @@ local function CreateEnchantsPanel()
 	f:RegisterForDrag("LeftButton")
 	f:SetScript("OnDragStart", f.StartMoving)
 	f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing(); SavePanelPos(self) end)
-	UISpecialFrames = UISpecialFrames or {}
 	tinsert(UISpecialFrames, "BisBuddyEnchantsFrame")
 	f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 	f.title:SetPoint("TOPLEFT", 16, -14)
@@ -3287,7 +3282,6 @@ local function CreateGearPanel()
 	f:RegisterForDrag("LeftButton")
 	f:SetScript("OnDragStart", f.StartMoving)
 	f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing(); SavePanelPos(self) end)
-	UISpecialFrames = UISpecialFrames or {}
 	tinsert(UISpecialFrames, "BisBuddyGearFrame")
 	f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 	f.title:SetPoint("TOPLEFT", 16, -14)
@@ -3457,7 +3451,6 @@ local function CreateSRPanel()
 	f:RegisterForDrag("LeftButton")
 	f:SetScript("OnDragStart", f.StartMoving)
 	f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing(); SavePanelPos(self) end)
-	UISpecialFrames = UISpecialFrames or {}
 	tinsert(UISpecialFrames, "BisBuddySRFrame")
 	f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 	f.title:SetPoint("TOPLEFT", 16, -14)

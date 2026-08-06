@@ -279,6 +279,16 @@ for i = before, #created do
 	if created[i].scripts.OnEvent then ev = created[i] break end
 end
 check(ev ~= nil, "event frame found")
+-- taint guard: BisBuddy must NEVER re-assign the StaticPopupDialogs / UISpecialFrames
+-- GLOBALS (that taints secure UI at load - the PvP-ruleset + ConfirmBindOnUse bug).
+-- Adding our own keys (StaticPopupDialogs["BISBUDDY_*"], tinsert(UISpecialFrames,...)) is fine.
+do
+	local src = assert(io.open(ROOT .. "/../BisBuddy/BisBuddy.lua")):read("*a")
+	check(not src:find("StaticPopupDialogs = StaticPopupDialogs", 1, true),
+		"no re-assignment of StaticPopupDialogs global (load-time taint guard)")
+	check(not src:find("UISpecialFrames = UISpecialFrames", 1, true),
+		"no re-assignment of UISpecialFrames global (load-time taint guard)")
+end
 ev.scripts.OnEvent(ev, "ADDON_LOADED", "BisBuddy")
 check(BisBuddyDB.phase == 1, "default phase is 1 (Pre-Raid + ZG)")
 check(BisBuddyDB.maxDiff == 3, "default maxDiff is 3 (Mythic 0, excludes Mythic+)")
