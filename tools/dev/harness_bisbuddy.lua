@@ -187,7 +187,7 @@ _G.RaidWarningFrame = NewFrame("RaidWarningFrame")
 _G.SlashCmdList = {}
 
 -- ---------- load real Data.lua + addon ----------
-assert(loadfile(ROOT .. "/../BisBuddy/Data.lua"))()
+assert(loadfile(os.getenv("BISBUDDY_DATA") or (ROOT .. "/../BisBuddy/Data.lua")))()
 pcall(function() assert(loadfile(ROOT .. "/../BisBuddy/TalentData.lua"))() end) -- optional
 check(type(BisBuddyData) == "table" and type(BisBuddyData.cells) == "table", "Data.lua loads (cells)")
 check(BisBuddyData.maxDiff == 5, "maxDiff = 5 (got " .. tostring(BisBuddyData.maxDiff) .. ")")
@@ -542,9 +542,12 @@ do
 	check(tB:find("vs " .. twoh, 1, true) ~= nil, "1H drop while 2H equipped compares against the 2H (vs " .. twoh .. ")")
 	check(tB:find("100.0", 1, true) == nil and tB:find("vs 0", 1, true) == nil,
 		"1H drop while 2H equipped is NOT a false 100% upgrade")
-	-- (C) 2H equipped, drop an off-hand / held -> also compared to the 2H
-	registry[990002] = { equipLoc = "INVTYPE_WEAPONOFFHAND", subType = "Daggers", stats = { ITEM_MOD_SPELL_POWER_SHORT = 20 } }
-	check(tipOf(990002):find("vs " .. twoh, 1, true) ~= nil, "off-hand drop while 2H equipped compares against the 2H")
+	-- (C) 2H equipped, drop a HELD off-hand (Tinker-usable) -> also compared to the 2H
+	registry[990002] = { equipLoc = "INVTYPE_HOLDABLE", subType = "Miscellaneous", stats = { ITEM_MOD_SPELL_POWER_SHORT = 20 } }
+	check(tipOf(990002):find("vs " .. twoh, 1, true) ~= nil, "off-hand (held) drop while 2H equipped compares against the 2H")
+	-- (C2) an off-hand WEAPON is unequippable for non-dual-wield Tinker -> no eval at all
+	registry[990003] = { equipLoc = "INVTYPE_WEAPONOFFHAND", subType = "Daggers", stats = { ITEM_MOD_SPELL_POWER_SHORT = 20 } }
+	check(tipOf(990003):find("vs ", 1, true) == nil, "off-hand WEAPON gives no eval for non-dual-wield Tinker (dual-wield gate)")
 	equipped[16] = nil; equipped[17] = nil; wipeEq()
 end
 
@@ -589,11 +592,27 @@ local function hCanUse(spec, typ, slot)
 	if WSLOT[slot] then
 		local wt = WMAP[typ]; if not wt then return false end
 		if not has(cp.weap, wt) then return false end
+		if slot=="Off Hand" and cp.dw == false then return false end
 		if (slot=="One-Hand" or slot=="Main Hand" or slot=="Off Hand") and has(cp.no1, wt) then return false end
 		if slot=="Two-Hand" and has(cp.no2, wt) then return false end
 		return true
 	end
 	return true
+end
+-- dual-wield gate: off-hand WEAPONS require dual-wield (Held In Off-hand / Shield are separate slots)
+check(BisBuddyData.prof.classes["Tinker"] and BisBuddyData.prof.classes["Tinker"].dw == false,
+	"Tinker cannot dual-wield (baked dw=false)")
+check(not hCanUse("Tinker|Invention", "Daggers", "Off Hand"),
+	"off-hand dagger REJECTED for non-dual-wield Tinker")
+check(hCanUse("Tinker|Invention", "Daggers", "One-Hand"),
+	"one-hand dagger still allowed for Tinker (main-hand use)")
+do
+	local barbSpec
+	for k in pairs(BisBuddyData.weights) do if k:match("^Barbarian|") then barbSpec = k; break end end
+	check(BisBuddyData.prof.classes["Barbarian"] and BisBuddyData.prof.classes["Barbarian"].dw == true,
+		"Barbarian can dual-wield (baked dw=true)")
+	check(barbSpec ~= nil and hCanUse(barbSpec, "Daggers", "Off Hand"),
+		"off-hand dagger ALLOWED for dual-wield Barbarian (" .. tostring(barbSpec) .. ")")
 end
 -- baked stats present?
 check(type(BisBuddyData.items[topStaffId][7]) == "table", "pool items carry baked raw stats (field 7)")

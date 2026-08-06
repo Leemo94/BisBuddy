@@ -945,6 +945,9 @@ CanUseByType = function(subType, slot)
 		if not listHas(cp.weap, wt) then
 			return false
 		end
+		if slot == "Off Hand" and cp.dw == false then
+			return false  -- off-hand WEAPON needs dual-wield; Shield/Held In Off-hand are separate slots
+		end
 		if (slot == "One-Hand" or slot == "Main Hand" or slot == "Off Hand") and listHas(cp.no1, wt) then
 			return false
 		end

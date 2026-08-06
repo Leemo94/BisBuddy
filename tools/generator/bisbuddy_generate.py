@@ -135,6 +135,7 @@ def parse_proficiency(src):
             prof["weap"][cls] = {
                 "allowedTypes": re.findall(r'"([^"]+)"', at.group(1)) if at else [],
                 "shield": "shield:!0" in body,
+                "dualWield": "dualWield:!0" in body,
                 "noOneHanded": re.findall(r'"([^"]+)"', no1.group(1)) if no1 else [],
                 "noTwoHanded": re.findall(r'"([^"]+)"', no2.group(1)) if no2 else [],
             }
@@ -169,6 +170,8 @@ def can_use(spec_key, item, prof):
             ov = prof["rangedOverride"].get(spec)
             allowed = set(ov) if ov else (set(w["allowedTypes"]) & RANGED_WEAPON_TYPES)
             return wt in allowed
+        if slot == "Off Hand" and not w.get("dualWield"):
+            return False  # off-hand-only weapon requires dual-wield
         allowed = set(w["allowedTypes"])
         if slot in ("One-Hand", "Main Hand", "Off Hand"):
             allowed -= set(w["noOneHanded"])
@@ -430,9 +433,10 @@ def emit_lua(out_path, manifest, weights, cells, pool, phases, total_items, prof
             return "{" + ",".join(lua_str(x) for x in xs) + "}"
         for cls in sorted(prof["weap"]):
             w = prof["weap"][cls]
-            push("BisBuddyData.prof.classes[%s] = { weap = %s, armor = %s, shield = %s, no1 = %s, no2 = %s }" % (
+            push("BisBuddyData.prof.classes[%s] = { weap = %s, armor = %s, shield = %s, dw = %s, no1 = %s, no2 = %s }" % (
                 lua_str(cls), lualist(w["allowedTypes"]), lualist(prof["armor"].get(cls, [])),
-                "true" if w["shield"] else "false", lualist(w["noOneHanded"]), lualist(w["noTwoHanded"])))
+                "true" if w["shield"] else "false", "true" if w.get("dualWield") else "false",
+                lualist(w["noOneHanded"]), lualist(w["noTwoHanded"])))
         for spec in sorted(prof.get("rangedOverride", {})):
             push("BisBuddyData.prof.rangedOverride[%s] = %s" % (
                 lua_str(spec), lualist(prof["rangedOverride"][spec])))
