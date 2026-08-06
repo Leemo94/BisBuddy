@@ -2812,7 +2812,7 @@ local function CreateBrowsePanel()
 	close:SetPoint("TOPRIGHT", -6, -6)
 
 	f.slotDD = MakeDropdown(f, "BisBuddyBrowseSlotDD", 150)
-	f.slotDD:SetPoint("TOPLEFT", 2, -32)
+	f.slotDD:SetPoint("TOPLEFT", 16, -38)
 	f.slotDD:SetBuilder(function(add)
 		for _, s in ipairs(BROWSE_SLOT_ORDER) do
 			local slot, lst = s, activeSlotRanks[s]
@@ -3463,7 +3463,7 @@ local function CreateSRPanel()
 	close:SetPoint("TOPRIGHT", -6, -6)
 
 	f.raidDD = MakeDropdown(f, "BisBuddySRRaidDD", 116)
-	f.raidDD:SetPoint("TOPLEFT", 0, -34)
+	f.raidDD:SetPoint("TOPLEFT", 0, -40)
 	f.raidDD:SetBuilder(function(add)
 		for _, r in ipairs(SR_RAIDS) do
 			local raid = r
@@ -3472,7 +3472,7 @@ local function CreateSRPanel()
 	end)
 
 	f.diffDD = MakeDropdown(f, "BisBuddySRDiffDD", 80)
-	f.diffDD:SetPoint("TOPLEFT", 172, -34)
+	f.diffDD:SetPoint("TOPLEFT", 172, -40)
 	f.diffDD:SetBuilder(function(add)
 		for d = 1, (D.maxDiff or 5) do
 			local n = d
