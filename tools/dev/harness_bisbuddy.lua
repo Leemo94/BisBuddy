@@ -291,7 +291,7 @@ do
 end
 ev.scripts.OnEvent(ev, "ADDON_LOADED", "BisBuddy")
 check(BisBuddyDB.phase == 1, "default phase is 1 (Pre-Raid + ZG)")
-check(BisBuddyDB.maxDiff == 3, "default maxDiff is 3 (Mythic 0, excludes Mythic+)")
+check(BisBuddyDB.maxDiff == 5, "default maxDiff is 5 (Mythic+ / M+10, launch default)")
 ev.scripts.OnEvent(ev, "PLAYER_LOGIN")
 check(lastChat(3):find("loaded", 1, true) ~= nil, "login banner printed")
 check(lastChat(3):find("phase", 1, true) ~= nil, "login banner names the phase")

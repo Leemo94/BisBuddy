@@ -712,8 +712,9 @@ local statScratch = {}
 -- equipped compares), not the static aspirational BiS lists. Specs with no cap
 -- (healers etc.) are unaffected.
 -- CoA level-60 cap targets (rating): physical/ranged hit 8% * 10 = 80; spell hit
--- 17% * 8 = 136; expertise 26 skill * 2.5 = 65 (from bisbeard's planner 2026-08-05).
-local CAP = { melee = 80, ranged = 80, spell = 136, exp = 65 }
+-- 17% * 8 = 136; expertise 26 skill * 2.5 = 65; spell penetration 60 (from bisbeard's
+-- planner; spell-pen cap wired up 2026-08-07 for the spen-flagged specs).
+local CAP = { melee = 80, ranged = 80, spell = 136, exp = 65, spen = 60 }
 
 -- Per-spec hit/expertise cap profiles, reverse-engineered from bisbeard's planner
 -- (App bundle, CoA level 60) 2026-08-05. hit = which hit cap applies
@@ -721,7 +722,7 @@ local CAP = { melee = 80, ranged = 80, spell = 136, exp = 65 }
 CAP.spec = {
 	["Barbarian|Headhunting"] = { hit="ranged" },
 	["Barbarian|Brutality"] = { hit="melee", exp=true },
-	["Barbarian|Ancestry"] = { hit="ranged" },
+	["Barbarian|Ancestry"] = { hit="melee", exp=true },
 	["Witch Doctor|Shadowhunting"] = { hit="ranged", spen=true },
 	["Witch Doctor|Voodoo"] = { hit="spell", spen=true },
 	["Felsworn|Infernal"] = { hit="spell" },
@@ -740,8 +741,8 @@ CAP.spec = {
 	["Guardian|Gladiator"] = { hit="melee", exp=true },
 	["Guardian|Inspiration"] = { hit="melee", exp=true },
 	["Guardian|Vanguard"] = { hit="melee", exp=true },
-	["Templar|Oathkeeper"] = { hit="melee", exp=true },
-	["Templar|Zealot"] = { hit="melee", exp=true },
+	["Templar|Oathkeeper"] = { hit="melee", exp=true, spen=true },
+	["Templar|Zealot"] = { hit="melee", exp=true, spen=true },
 	["Templar|Crusader"] = { hit="melee", exp=true, spen=true },
 	["Bloodmage|Sanguine"] = { hit="spell", spen=true },
 	["Bloodmage|Accursed"] = { hit="melee", exp=true, spen=true },
@@ -789,10 +790,10 @@ CAP.spec = {
 -- you want before the surplus becomes worthless. nil when the spec has no cap.
 local function CapContext()
 	local caps = specKey and CAP.spec[specKey]
-	if not caps or (not caps.hit and not caps.exp) then
+	if not caps or (not caps.hit and not caps.exp and not caps.spen) then
 		return nil
 	end
-	local curHit, curExp = 0, 0
+	local curHit, curExp, curSpen = 0, 0, 0
 	for inv = 1, 18 do
 		local link = GetInventoryItemLink("player", inv)
 		if link then
@@ -800,10 +801,11 @@ local function CapContext()
 			if pcall(GetItemStats, link, statScratch) then
 				curHit = curHit + (statScratch.ITEM_MOD_HIT_RATING_SHORT or 0)
 				curExp = curExp + (statScratch.ITEM_MOD_EXPERTISE_RATING_SHORT or 0)
+				curSpen = curSpen + (statScratch.ITEM_MOD_SPELL_PENETRATION_SHORT or 0)
 			end
 		end
 	end
-	local ctx = { curHit = curHit, curExp = curExp }
+	local ctx = { curHit = curHit, curExp = curExp, curSpen = curSpen }
 	if caps.hit then
 		ctx.hitCap = CAP[caps.hit]
 		ctx.hitRemaining = math.max(0, (ctx.hitCap or 0) - curHit)
@@ -811,6 +813,10 @@ local function CapContext()
 	if caps.exp then
 		ctx.expCap = CAP.exp
 		ctx.expRemaining = math.max(0, CAP.exp - curExp)
+	end
+	if caps.spen then
+		ctx.spenCap = CAP.spen
+		ctx.spenRemaining = math.max(0, CAP.spen - curSpen)
 	end
 	return ctx
 end
@@ -845,6 +851,8 @@ local function ScoreLink(link)
 					value = math.min(value, cap.hitRemaining)
 				elseif bisKey == "expertise" and cap.expRemaining then
 					value = math.min(value, cap.expRemaining)
+				elseif bisKey == "spellPenetration" and cap.spenRemaining then
+					value = math.min(value, cap.spenRemaining)
 				end
 			end
 			score = score + value * w
@@ -1732,10 +1740,11 @@ local function RefreshWeightsPanel()
 		weightsPanel.subtitle:SetText("bisbeard defaults - edit any field to customize")
 	end
 	local caps = specKey and CAP.spec[specKey]
-	if caps and (caps.hit or caps.exp) then
+	if caps and (caps.hit or caps.exp or caps.spen) then
 		local parts = {}
 		if caps.hit then parts[#parts + 1] = format("%s hit %d", caps.hit, CAP[caps.hit] or 0) end
 		if caps.exp then parts[#parts + 1] = format("expertise %d", CAP.exp) end
+		if caps.spen then parts[#parts + 1] = format("spell pen %d", CAP.spen) end
 		weightsPanel.capLine:SetText("|cffffcc55Raid caps:|r " .. table.concat(parts, "  |cff666666/|r  ") ..
 			"  |cff808080(rating - gear hit/exp counts only up to the cap)|r")
 	else
@@ -3712,7 +3721,7 @@ SlashCmdList["BISBUDDY"] = function(msg)
 	elseif cmd == "caps" or cmd == "cap" then
 		RefreshSpec(true)
 		local caps = specKey and CAP.spec[specKey]
-		if not caps or (not caps.hit and not caps.exp) then
+		if not caps or (not caps.hit and not caps.exp and not caps.spen) then
 			Print((specKey or "spec") .. ": no hit/expertise cap for this spec (nothing to cap)")
 		else
 			local ctx = CapContext()
@@ -3726,7 +3735,12 @@ SlashCmdList["BISBUDDY"] = function(msg)
 				Print(format("expertise: |cffffd100%d|r / %d rating%s", ctx.curExp, ctx.expCap or 0,
 					need > 0 and format("  -  |cffff8800%d to cap|r", need) or "  -  |cff20ff20capped|r"))
 			end
-			Print("|cff888888hit/expertise on gear is valued only up to these gaps in upgrade checks|r")
+			if ctx and caps.spen then
+				local need = ctx.spenRemaining or 0
+				Print(format("spell pen: |cffffd100%d|r / %d rating%s", ctx.curSpen, ctx.spenCap or 0,
+					need > 0 and format("  -  |cffff8800%d to cap|r", need) or "  -  |cff20ff20capped|r"))
+			end
+			Print("|cff888888hit/expertise/spell-pen on gear is valued only up to these gaps in upgrade checks|r")
 		end
 	elseif cmd == "threshold" and tonumber(rest) then
 		db.threshold = math.max(1, math.min(MERGE_DEPTH, tonumber(rest)))
@@ -3876,7 +3890,8 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
 		db.threshold = db.threshold or 10
 		db.minUpgradePct = db.minUpgradePct or 1
 		db.phase = db.phase or 1 -- default: Pre-Raid + Zul'Gurub (raise as you progress)
-		db.maxDiff = db.maxDiff or 3 -- default: Mythic ("Mythic 0"); Mythic+ keystones not live yet
+		db.maxDiff = db.maxDiff or 5 -- default: Mythic+ (M+10 live since 2026-08-07)
+		if not db.mplusLaunch then db.maxDiff = 5; db.mplusLaunch = true end -- one-time bump to M+ at launch (incl. existing installs)
 		if db.includePvP == nil then db.includePvP = false end -- default: exclude PvP + Bloodforged
 		if db.excludeCrafted == nil then db.excludeCrafted = false end -- default: show crafted
 		if db.sources == nil then           -- per-source visibility (Sources panel)

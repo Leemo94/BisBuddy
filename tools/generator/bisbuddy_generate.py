@@ -123,9 +123,12 @@ def parse_proficiency(src):
       'armor': {Class: [types]},
       'rangedOverride': {SpecName: [types]} }."""
     prof = {"weap": {}, "armor": {}, "rangedOverride": {}}
-    m = re.search(r"\bkt=\{", src)
+    # weapon/proficiency class map. bisbeard's minified container var changes on every
+    # bundle rebuild (was `kt`, now `Ct`), so anchor on the STRUCTURE of the first class
+    # entry (Name:{dualWield:!...}) instead of the fragile var name.
+    m = re.search(r"=(\{\s*\"?[A-Za-z][\w '-]*\"?:\{dualWield:!)", src)
     if m:
-        kt = _balanced(src, m.end() - 1)
+        kt = _balanced(src, m.start(1))
         for cm in re.finditer(r'("?[\w \'-]+"?):\{(dualWield:[^}]*?allowedTypes:\[[^\]]*\][^}]*)\}', kt):
             cls = cm.group(1).strip('"')
             body = cm.group(2)
@@ -330,13 +333,20 @@ def item_category(it):
 # Vendor, quests, ...) reads as Normal. Cumulative order: 1 < 2 < 3 < 4 < 5.
 DIFF_LABELS = {1: "Normal", 2: "Heroic", 3: "Mythic", 4: "Ascended", 5: "Mythic+"}
 
+# Highest LIVE M+ keystone level on the realm. bisbeard tags M+ gear at keystone
+# breakpoints (Mythic 10/15/20/25/30/40); we only rank up to the released cap so the
+# Mythic+ view never points at unobtainable higher-keystone gear. Raise this as
+# Ascension unlocks higher keystones, then regenerate. (M+ launch 2026-08-07: cap 10.)
+RELEASED_MPLUS = 10
+
 
 def difficulty_tier(it):
     v = (it.get("version") or "").strip()
     if v == "Ascended":
         return 4
-    if v.startswith("Mythic") and any(c.isdigit() for c in v):
-        return 5  # Mythic+ keystones (Mythic 10-40) - not on the live realm yet
+    m = re.match(r"Mythic\s*(\d+)", v)
+    if m:  # Mythic+ keystone gear ("Mythic 10".."Mythic 40")
+        return 5 if int(m.group(1)) <= RELEASED_MPLUS else None  # None = keystone not live yet
     if "Mythic" in v:
         return 3  # base Mythic ("Mythic 0")
     if "Heroic" in v:
@@ -382,7 +392,10 @@ def build(weights, items, topn, prof=None, max_phase_cap=None):
                 continue
             s = score_item(it, w)
             if s and s > 0:
-                buckets.setdefault((iphase, difficulty_tier(it), it["slot"]), []).append((s, it))
+                tier = difficulty_tier(it)
+                if tier is None:      # unreleased M+ keystone (> RELEASED_MPLUS) - skip
+                    continue
+                buckets.setdefault((iphase, tier, it["slot"]), []).append((s, it))
         spec_cells = {}
         for (iphase, tier, slot), scored in buckets.items():
             scored.sort(key=lambda t: (-t[0], t[1]["name"]))
