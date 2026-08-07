@@ -36,13 +36,18 @@ SPECROLES = "https://coa.bisbeard.com"
 HEADERS = {"Referer": SITE + "/", "Origin": SITE, "Accept": "application/json",
            "User-Agent": "Mozilla/5.0 (BisBuddy talents)"}
 
+THROTTLE = 0.0   # seconds to pause after each successful request (politeness; set via --throttle)
+
 
 def get(url, retries=7):
     last = None
     for attempt in range(retries):
         try:
             req = urllib.request.Request(url, headers=HEADERS)
-            return json.load(urllib.request.urlopen(req, timeout=40))
+            data = json.load(urllib.request.urlopen(req, timeout=40))
+            if THROTTLE:
+                time.sleep(THROTTLE)
+            return data
         except urllib.error.HTTPError as e:      # back off hard on throttling / 5xx
             last = e
             wait = 6.0 if e.code in (429, 500, 502, 503, 504) else 0.6
@@ -182,6 +187,7 @@ def take_rate(cids, builds):
 
 
 def main():
+    global THROTTLE
     ap = argparse.ArgumentParser()
     ap.add_argument("--top", type=int, default=20, help="dungeon mode: top-N performers per spec")
     ap.add_argument("--difficulty", default="mythic", help="dungeon mode difficulty")
@@ -192,8 +198,11 @@ def main():
     ap.add_argument("--top-per-diff", dest="top_per_diff", type=int, default=10,
                     help="ZG mode: how many top raiders to take from each difficulty (default 10)")
     ap.add_argument("--class", dest="only_class", help="limit to one class's specs")
+    ap.add_argument("--throttle", type=float, default=0.5, help="seconds to pause after each request (politeness)")
+    ap.add_argument("--workers", type=int, default=2, help="concurrent armory fetches (lower = gentler)")
     ap.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "..", "BisBuddy", "TalentData.lua"))
     args = ap.parse_args()
+    THROTTLE = args.throttle
 
     specs = parse_specs(discover_specroles())
     if args.only_class:
@@ -235,7 +244,7 @@ def main():
                 if cid not in seen:
                     seen.add(cid); all_cids.append(cid)
         builds = {}
-        with concurrent.futures.ThreadPoolExecutor(4) as ex:
+        with concurrent.futures.ThreadPoolExecutor(args.workers) as ex:
             for cid, res in zip(all_cids, ex.map(build_of, all_cids)):
                 builds[cid] = res
 
