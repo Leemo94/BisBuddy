@@ -291,7 +291,7 @@ do
 end
 ev.scripts.OnEvent(ev, "ADDON_LOADED", "BisBuddy")
 check(BisBuddyDB.phase == 1, "default phase is 1 (Pre-Raid + ZG)")
-check(BisBuddyDB.maxDiff == 5, "default maxDiff is 5 (Mythic+ / M+10, launch default)")
+check(BisBuddyDB.raidDiff == 4 and BisBuddyDB.mplusDiff == 5, "default difficulty: raid Ascended (4) + M+/dungeon M+10 (5)")
 ev.scripts.OnEvent(ev, "PLAYER_LOGIN")
 check(lastChat(3):find("loaded", 1, true) ~= nil, "login banner printed")
 check(lastChat(3):find("phase", 1, true) ~= nil, "login banner names the phase")
@@ -306,8 +306,8 @@ SlashCmdList["BISBUDDY"]("phase 5")
 check(BisBuddyDB.phase == 5, "/bb phase 5 -> 5")
 -- ranked-item tests use the Ascended-cap merge (topStaffId is an Ascended item),
 -- so raise the addon's difficulty cap from the Mythic-0 default to Ascended
-SlashCmdList["BISBUDDY"]("diff ascended")
-check(BisBuddyDB.maxDiff == 4, "/bb diff ascended -> 4 for ranked tests")
+SlashCmdList["BISBUDDY"]("diff raid ascended")
+check(BisBuddyDB.raidDiff == 4, "/bb diff raid ascended -> raidDiff 4 for ranked tests")
 
 -- registry setup: equipped weak staff (unranked custom item)
 registry[900001] = { equipLoc = "INVTYPE_2HWEAPON", stats = { ITEM_MOD_INTELLECT_SHORT = 10, ITEM_MOD_SPELL_POWER_SHORT = 30 } }
@@ -431,26 +431,43 @@ SlashCmdList["BISBUDDY"]("phase 5") -- restore
 -- difficulty cap (phase 5). topStaffId is the Ascended-tier #1; capping the max
 -- difficulty below Ascended must drop it from #1.
 check(BisBuddyData.items[topStaffId][5] == 4, "top staff is Ascended tier (premise)")
-SlashCmdList["BISBUDDY"]("diff normal")
-check(BisBuddyDB.maxDiff == 1, "/bb diff normal -> 1")
+SlashCmdList["BISBUDDY"]("diff raid normal")
+check(BisBuddyDB.raidDiff == 1, "/bb diff raid normal -> raidDiff 1")
 GameTooltip.lines = {}
 GameTooltip.BisBuddyLastLink = nil
 GameTooltip.currentLink = linkFor(topStaffId)
 for _, fn in ipairs(GameTooltip.hooks.OnTooltipSetItem or {}) do fn(GameTooltip) end
 tipText = table.concat(GameTooltip.lines, "\n")
 check(tipText:find("#1 BiS Two%-Hand") == nil, "diff Normal: Ascended staff no longer #1 BiS")
-SlashCmdList["BISBUDDY"]("diff mythic")
-check(BisBuddyDB.maxDiff == 3, "/bb diff mythic -> 3 (Mythic 0)")
-SlashCmdList["BISBUDDY"]("diff mythic+")
-check(BisBuddyDB.maxDiff == 5, "/bb diff mythic+ -> 5 (keystones)")
-SlashCmdList["BISBUDDY"]("diff asc")
-check(BisBuddyDB.maxDiff == 4, "/bb diff asc -> 4 (restored)")
+SlashCmdList["BISBUDDY"]("diff raid mythic")
+check(BisBuddyDB.raidDiff == 3, "/bb diff raid mythic -> raidDiff 3")
+SlashCmdList["BISBUDDY"]("diff m+ m10")
+check(BisBuddyDB.mplusDiff == 5, "/bb diff m+ m10 -> mplusDiff 5 (independent of raid)")
+SlashCmdList["BISBUDDY"]("diff raid asc")
+check(BisBuddyDB.raidDiff == 4, "/bb diff raid asc -> raidDiff 4 (restored)")
 -- back at Ascended, the top staff is #1 again
 GameTooltip.lines = {}
 GameTooltip.BisBuddyLastLink = nil
 GameTooltip.currentLink = linkFor(topStaffId)
 for _, fn in ipairs(GameTooltip.hooks.OnTooltipSetItem or {}) do fn(GameTooltip) end
 check(table.concat(GameTooltip.lines, "\n"):find("#1 BiS Two%-Hand") ~= nil, "diff Ascended: top staff is #1 again")
+
+-- INDEPENDENCE (#50): raid difficulty and M+/dungeon difficulty are SEPARATE caps
+-- ("Heroic in MC, M+10 in dungeons"). Lowering raid must not touch M+.
+SlashCmdList["BISBUDDY"]("diff raid heroic")
+check(BisBuddyDB.raidDiff == 2 and BisBuddyDB.mplusDiff == 5, "raid + M+ diffs are independent (raid Heroic, M+ still M+10)")
+GameTooltip.lines = {}; GameTooltip.BisBuddyLastLink = nil; GameTooltip.currentLink = linkFor(topStaffId)
+for _, fn in ipairs(GameTooltip.hooks.OnTooltipSetItem or {}) do fn(GameTooltip) end
+check(table.concat(GameTooltip.lines, "\n"):find("#1 BiS Two%-Hand") == nil, "raid Heroic drops the Ascended raid staff from BiS")
+do  -- ...while M+10 dungeon gear is still eligible - proves the two caps are independent
+	local m10dungeon
+	for _, it in pairs(BisBuddyData.items) do
+		if it[5] == 5 and it[8] == "dungeon" then m10dungeon = it; break end
+	end
+	check(m10dungeon ~= nil and m10dungeon[5] <= BisBuddyDB.mplusDiff,
+		"M+10 dungeon gear still passes the M+ cap while raid is capped to Heroic")
+end
+SlashCmdList["BISBUDDY"]("diff raid ascended")  -- restore Ascended for later tests
 
 -- PvP/Bloodforged exclusion toggle (phase 5, diff Ascended). Find a PvP/BF item
 -- that lands in the top-15 of some slot's merged include-PvP list.
@@ -558,6 +575,14 @@ do
 	-- (C2) an off-hand WEAPON is unequippable for non-dual-wield Tinker -> no eval at all
 	registry[990003] = { equipLoc = "INVTYPE_WEAPONOFFHAND", subType = "Daggers", stats = { ITEM_MOD_SPELL_POWER_SHORT = 20 } }
 	check(tipOf(990003):find("vs ", 1, true) == nil, "off-hand WEAPON gives no eval for non-dual-wield Tinker (dual-wield gate)")
+	-- (D) M+ upgrade detection: a HIGHER-stat unranked version (an M+3-style drop) reads as an
+	-- upgrade over an equipped lower version, via live stat scoring - no baked M+3 keystone needed.
+	registry[990201] = { equipLoc = "INVTYPE_2HWEAPON", subType = "Staves", stats = { ITEM_MOD_SPELL_POWER_SHORT = 65, ITEM_MOD_INTELLECT_SHORT = 38 } }
+	registry[990202] = { equipLoc = "INVTYPE_2HWEAPON", subType = "Staves", stats = { ITEM_MOD_SPELL_POWER_SHORT = 72, ITEM_MOD_INTELLECT_SHORT = 42 } }
+	equipped[16] = 990201; equipped[17] = nil; wipeEq()
+	local tD = tipOf(990202)
+	check(tD:find("vs equipped", 1, true) ~= nil and tD:find("+", 1, true) ~= nil,
+		"M+ upgrade: higher-stat unranked staff (M+3-style drop) reads as an upgrade over the equipped lower one")
 	equipped[16] = nil; equipped[17] = nil; wipeEq()
 end
 
@@ -627,15 +652,22 @@ end
 -- baked stats present?
 check(type(BisBuddyData.items[topStaffId][7]) == "table", "pool items carry baked raw stats (field 7)")
 -- effective = bisbeard Invention merged with a huge stamina override
-SlashCmdList["BISBUDDY"]("phase 5"); SlashCmdList["BISBUDDY"]("diff ascended")  -- fix caps: phase<=5, tier<=4
+SlashCmdList["BISBUDDY"]("phase 5"); SlashCmdList["BISBUDDY"]("diff raid ascended")  -- caps: phase<=5, raid<=Ascended, M+ default M+10
 local effW = {}; for k,v in pairs(BisBuddyData.weights["Tinker|Invention"]) do effW[k]=v end
 effW.stamina = 1000
+-- mirror the addon's per-source diff cap: raid gear <= raidDiff, dungeon <= mplusDiff, else ok
+local function hDiffOK(info)
+	local src, tier = info[8], info[5] or 1
+	if src == "raid" then return tier <= BisBuddyDB.raidDiff end
+	if src == "dungeon" then return tier <= BisBuddyDB.mplusDiff end
+	return true
+end
 -- expected #1 Two-Hand from the WIDE usable pool (what the addon ranks when weights
 -- are custom), not just bisbeard's curated cells
 local pool2h = {}
 for _, id in ipairs(BisBuddyData.slotPool["Two-Hand"] or {}) do
 	local info = BisBuddyData.items[id]
-	if info and (info[4] or 1) <= 5 and (info[5] or 1) <= 4 and hCanUse("Tinker|Invention", info[9], "Two-Hand") then
+	if info and (info[4] or 1) <= 5 and hDiffOK(info) and hCanUse("Tinker|Invention", info[9], "Two-Hand") then
 		pool2h[#pool2h + 1] = { id }
 	end
 end
@@ -832,9 +864,9 @@ panel.specDD.navState = nil
 rows = driveDD(panel.phaseDD)
 rows[3].func()
 check(BisBuddyDB.phase == 3, "panel phase picker sets phase")
-rows = driveDD(panel.diffDD)
+rows = driveDD(panel.raidDD)
 rows[4].func()
-check(BisBuddyDB.maxDiff == 4, "panel diff picker sets max difficulty")
+check(BisBuddyDB.raidDiff == 4, "panel raid-diff picker sets raid difficulty")
 -- checkboxes (PvP/crafted filters moved to the Sources panel; covered by /bb pvp|crafted above)
 panel.tooltipCB:SetChecked(false); panel.tooltipCB.scripts.OnClick(panel.tooltipCB)
 check(BisBuddyDB.tooltip == false, "tooltip checkbox toggles db.tooltip")
@@ -923,7 +955,7 @@ check(browsed2 > 0, "browser stays populated after a phase change (" .. browsed2
 
 -- de-dup: same base item's difficulty/version variants collapse into one row.
 SlashCmdList["BISBUDDY"]("phase 5")
-SlashCmdList["BISBUDDY"]("diff mythic+")   -- widest set of difficulty variants
+SlashCmdList["BISBUDDY"]("diff raid ascended"); SlashCmdList["BISBUDDY"]("diff m+ m10")   -- widest set of difficulty variants
 local slotInfos = driveDD(bp.slotDD)
 local expandable, chosenSlot
 for _, info in ipairs(slotInfos) do
@@ -1054,6 +1086,11 @@ check(lastChat(1):find("newer version", 1, true) ~= nil and lastChat(1):find("1.
 vchat = #chatLog
 ev.scripts.OnEvent(ev, "CHAT_MSG_ADDON", "BisBuddyVer", "V1.4.0", "GUILD", "Updated2")
 check(#chatLog == vchat, "out-of-date warning fires only once per session")
+-- out-of-date BANNER: the main panel surfaces a VISIBLE warning (not just the chat line)
+if _G.BisBuddyFrame:IsShown() then SlashCmdList["BISBUDDY"]("") end
+SlashCmdList["BISBUDDY"]("")   -- reopen -> RefreshMainPanel with warnedOutOfDate latched
+check(_G.BisBuddyFrame.oodWarn:IsShown() and not _G.BisBuddyFrame.hint:IsShown(),
+	"out-of-date main-panel banner shows (hint hidden) when a newer version is known")
 
 -- ---------- group loot helper (/bb loot) ----------
 SlashCmdList["BISBUDDY"]("spec Invention")

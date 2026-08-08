@@ -277,6 +277,7 @@ local function PhaseLabel(p)
 end
 
 local function DiffLabel(d)
+	if d == 5 then return "M+10" end   -- Mythic+ tier = M+10 gear (the only keystone breakpoint bisbeard itemizes)
 	return (D.diffLabels and D.diffLabels[d]) or ("Tier " .. tostring(d))
 end
 
@@ -377,7 +378,7 @@ local function CustomScore(itemId, slot, w)
 	return score
 end
 
--- Merge every (phase <= db.phase, tier <= db.maxDiff) cell per slot, drop
+-- Merge every (phase <= db.phase, tier <= raid/M+ cap for its source) cell per slot, drop
 -- excluded items, sort by score and assign ranks. The top of each merged slot
 -- list is the exact cumulative BiS for the current caps (see generator note).
 local CanUseByType   -- forward decl (defined with the proficiency helpers below)
@@ -391,6 +392,15 @@ local function BuildRankIndex()
 	end
 	local isCustom = IsSpecCustom()
 	local bySlot = {}
+	-- per-item difficulty cap, split by content: raid gear obeys db.raidDiff, dungeon/M+
+	-- gear obeys db.mplusDiff, everything else is governed only by the Sources filter.
+	local function diffOK(info)
+		local src = info and info[8]
+		local tier = (info and info[5]) or 1
+		if src == "raid" then return tier <= db.raidDiff end
+		if src == "dungeon" then return tier <= db.mplusDiff end
+		return true
+	end
 	if isCustom and D.slotPool then
 		-- CUSTOM weights: rank the WIDE pool of every item your class can use,
 		-- scored by your weights - so an edit actually surfaces new gear, not just
@@ -400,7 +410,7 @@ local function BuildRankIndex()
 			for i = 1, #ids do
 				local id = ids[i]
 				local info = D.items[id]
-				if info and (info[4] or 1) <= db.phase and (info[5] or 1) <= db.maxDiff
+				if info and (info[4] or 1) <= db.phase and diffOK(info)
 					and not IsExcludedItem(id) and CanUseByType(info[9], slot) then
 					acc[#acc + 1] = { id, CustomScore(id, slot, specWeights) }
 				end
@@ -412,7 +422,7 @@ local function BuildRankIndex()
 		for phase = 1, db.phase do
 			local pcells = cells[phase]
 			if pcells then
-				for tier = 1, db.maxDiff do
+				for tier = 1, (D.maxDiff or 5) do
 					local tcells = pcells[tier]
 					if tcells then
 						for slot, list in pairs(tcells) do
@@ -423,7 +433,7 @@ local function BuildRankIndex()
 							end
 							for i = 1, #list do
 								local id = list[i][1]
-								if not IsExcludedItem(id) then
+								if not IsExcludedItem(id) and diffOK(D.items[id]) then
 									acc[#acc + 1] = { id, list[i][2] }
 								end
 							end
@@ -1460,6 +1470,7 @@ local DIFF_ALIASES = {
 	mythic = 3, myth = 3, m = 3, mythic0 = 3, m0 = 3,
 	ascended = 4, asc = 4, a = 4,
 	["mythic+"] = 5, ["m+"] = 5, mplus = 5, mythicplus = 5, keystone = 5, key = 5,
+	m10 = 5, ["m+10"] = 5, mythic10 = 5,
 }
 
 local function ResolveDiff(rest)
@@ -1474,17 +1485,21 @@ local function ResolveDiff(rest)
 	return DIFF_ALIASES[norm]
 end
 
-local function SetDiff(d, quiet)
+-- kind = "raid" (caps raid gear, tiers 1-4) or "mplus" (caps dungeon/M+ gear, 1-5)
+local function SetDiff(kind, d, quiet)
 	if not D.cells then
 		return
 	end
-	local maxd = D.maxDiff or 4
-	d = math.max(1, math.min(maxd, d))
-	db.maxDiff = d
+	if kind == "mplus" then
+		db.mplusDiff = math.max(1, math.min(D.maxDiff or 5, d))
+	else
+		db.raidDiff = math.max(1, math.min(4, d))
+	end
 	BuildRankIndex()
 	wipe(equippedScoreCache)
 	if not quiet then
-		Print(format("max difficulty -> |cffffd100%s|r (includes everything up to it)", DiffLabel(d)))
+		Print(format("%s difficulty -> |cffffd100%s|r", kind == "mplus" and "M+/dungeon" or "raid",
+			DiffLabel(kind == "mplus" and db.mplusDiff or db.raidDiff)))
 	end
 end
 
@@ -1500,8 +1515,8 @@ local function CmdTop(rest)
 		Print("unknown slot '" .. tostring(rest) .. "'. Try: head neck shoulders back chest wrists hands waist legs feet ring trinket 2h 1h mh oh shield held ranged")
 		return
 	end
-	Print(format("top %d |cffffd100%s|r for %s - phase |cffffd100%d %s|r, max diff |cffffd100%s|r:",
-		math.min(10, #list), slot, specKey, db.phase, PhaseLabel(db.phase), DiffLabel(db.maxDiff)))
+	Print(format("top %d |cffffd100%s|r for %s - phase |cffffd100%d %s|r, raid |cffffd100%s|r / M+ |cffffd100%s|r:",
+		math.min(10, #list), slot, specKey, db.phase, PhaseLabel(db.phase), DiffLabel(db.raidDiff), DiffLabel(db.mplusDiff)))
 	local base = BaselineForSlot(slot)
 	for i = 1, math.min(10, #list) do
 		local id, score = list[i][1], list[i][2]
@@ -2256,6 +2271,12 @@ local function CreateMainPanel()
 	f.hint:SetPoint("TOP", 0, -34)
 	f.hint:SetWidth(324)
 	f.hint:SetText("Set your spec, phase and difficulty. Then hover any item for its BiS rank + upgrade %.")
+	-- out-of-date banner: replaces the hint (same spot) when a newer peer version is seen
+	f.oodWarn = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	f.oodWarn:SetPoint("TOP", 0, -30)
+	f.oodWarn:SetWidth(330)
+	f.oodWarn:SetText("|cffff3030!! BISBUDDY IS OUT OF DATE - UPDATE !!|r")
+	f.oodWarn:Hide()
 	local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
 	close:SetPoint("TOPRIGHT", -6, -6)
 
@@ -2302,14 +2323,21 @@ local function CreateMainPanel()
 		end
 	end)
 
-	-- Max difficulty dropdown
-	rowLabel("Max diff", -142)
-	f.diffDD = MakeDropdown(f, "BisBuddyDiffDropDown", 210)
-	f.diffDD:SetPoint("TOPLEFT", 80, -136)
-	f.diffDD:SetBuilder(function(add)
-		for d = 1, (D.maxDiff or 5) do
+	-- Difficulty: two independent caps - raid gear (Normal..Ascended) + dungeon/M+ gear.
+	rowLabel("Difficulty", -142)
+	f.raidDD = MakeDropdown(f, "BisBuddyRaidDiffDropDown", 122)
+	f.raidDD:SetPoint("TOPLEFT", 80, -136)
+	f.raidDD:SetBuilder(function(add)
+		for d = 1, 4 do
 			local n = d
-			add(DiffLabel(n), function() SetDiff(n); RefreshMainPanel() end, db.maxDiff == n)
+			add(DiffLabel(n), function() SetDiff("raid", n); RefreshMainPanel() end, db.raidDiff == n)
+		end
+	end)
+	f.mplusDD = MakeDropdown(f, "BisBuddyMplusDiffDropDown", 122)
+	f.mplusDD:SetPoint("TOPLEFT", 208, -136)
+	f.mplusDD:SetBuilder(function(add)
+		for _, n in ipairs({ 1, 2, 3, 5 }) do   -- dungeon tiers: Normal/Heroic/Mythic + M+10 (no Ascended)
+			add(DiffLabel(n), function() SetDiff("mplus", n); RefreshMainPanel() end, db.mplusDiff == n)
 		end
 	end)
 
@@ -2381,9 +2409,11 @@ RefreshMainPanel = function()
 		return
 	end
 	local f = mainPanel
+	if warnedOutOfDate then f.oodWarn:Show(); f.hint:Hide() else f.oodWarn:Hide(); f.hint:Show() end
 	f.specDD:SetText(specKey or "not set - pick your spec")
 	f.phaseDD:SetText(db.phase .. " - " .. PhaseLabel(db.phase))
-	f.diffDD:SetText(DiffLabel(db.maxDiff))
+	f.raidDD:SetText("Raid: " .. DiffLabel(db.raidDiff))
+	f.mplusDD:SetText("M+: " .. DiffLabel(db.mplusDiff))
 	f.alertCB:SetChecked(db.alerts)
 	f.tooltipCB:SetChecked(db.tooltip)
 	if not f.threshEB:HasFocus() then f.threshEB:SetText(tostring(db.threshold)) end
@@ -2713,8 +2743,10 @@ RenderBrowse = function()
 
 	if specKey then
 		local tag = IsSpecCustom() and "   |cffcc66ff(custom weights - /bb weights to reset)|r" or ""
-		f.header:SetText(format("|cffffd100%s|r  -  phase %d %s, up to %s%s",
-			(strmatch(specKey, "|(.+)$") or specKey), db.phase, PhaseLabel(db.phase), DiffLabel(db.maxDiff), tag))
+		if warnedOutOfDate then tag = tag .. "   |cffff3030<< OUT OF DATE - UPDATE! >>|r" end
+		f.header:SetText(format("|cffffd100%s|r  -  phase %d %s, raid %s / M+ %s%s",
+			(strmatch(specKey, "|(.+)$") or specKey), db.phase, PhaseLabel(db.phase),
+			DiffLabel(db.raidDiff), DiffLabel(db.mplusDiff), tag))
 	else
 		f.header:SetText("|cffff2020No spec set|r - open BisBuddy (/bb) and pick your spec first.")
 	end
@@ -3376,7 +3408,7 @@ RenderSR = function()
 	wipe(equippedScoreCache)
 	for _, r in ipairs(f.rows) do r:Hide() end
 	local sr = db.sr or {}
-	local raid, tier, count = sr.raid, sr.tier or db.maxDiff or 3, sr.count or 2
+	local raid, tier, count = sr.raid, sr.tier or db.raidDiff or 3, sr.count or 2
 	f.raidDD:SetText(raid or "pick a raid")
 	f.diffDD:SetText(DiffLabel(tier))
 	if not f.countEB:HasFocus() then f.countEB:SetText(tostring(count)) end
@@ -3479,9 +3511,9 @@ local function CreateSRPanel()
 	f.diffDD = MakeDropdown(f, "BisBuddySRDiffDD", 80)
 	f.diffDD:SetPoint("TOPLEFT", 172, -40)
 	f.diffDD:SetBuilder(function(add)
-		for d = 1, (D.maxDiff or 5) do
+		for d = 1, 4 do   -- raid difficulties (the Reserve Planner is raid-focused)
 			local n = d
-			add(DiffLabel(n), function() db.sr = db.sr or {}; db.sr.tier = n; RenderSR() end, db.sr and (db.sr.tier or db.maxDiff) == n)
+			add(DiffLabel(n), function() db.sr = db.sr or {}; db.sr.tier = n; RenderSR() end, db.sr and (db.sr.tier or db.raidDiff) == n)
 		end
 	end)
 
@@ -3609,16 +3641,16 @@ SlashCmdList["BISBUDDY"] = function(msg)
 			SetPhase(p)
 		end
 	elseif cmd == "diff" or cmd == "difficulty" then
-		local d = ResolveDiff(rest)
-		if not d then
-			Print("max difficulty: |cffffd100" .. DiffLabel(db.maxDiff) .. "|r (includes all tiers up to it)")
-			local parts = {}
-			for i = 1, (D.maxDiff or 4) do
-				parts[#parts + 1] = format("%d=%s", i, DiffLabel(i))
-			end
-			Print("set with /bb diff <name|1-4>: " .. table.concat(parts, ", "))
+		local sub, val = strmatch(strlower(rest or ""), "^(%S*)%s*(.*)$")
+		local rd = ResolveDiff(val)
+		if sub == "raid" and rd then
+			SetDiff("raid", rd)
+		elseif (sub == "m+" or sub == "mplus" or sub == "dungeon" or sub == "dung") and rd then
+			SetDiff("mplus", rd)
 		else
-			SetDiff(d)
+			Print(format("difficulty - raid: |cffffd100%s|r, M+/dungeon: |cffffd100%s|r",
+				DiffLabel(db.raidDiff), DiffLabel(db.mplusDiff)))
+			Print("set with |cffffd100/bb diff raid <normal|heroic|mythic|ascended>|r  or  |cffffd100/bb diff m+ <normal|heroic|mythic|m10>|r")
 		end
 	elseif cmd == "talents" or cmd == "talent" then
 		local a = strlower(rest or "")
@@ -3844,8 +3876,8 @@ SlashCmdList["BISBUDDY"] = function(msg)
 			specKey and ("|cffffd100" .. specKey .. "|r") or "|cffff2020not detected|r"))
 		local srcOn = 0
 		for _, s in ipairs(SOURCE_BUCKETS) do if not db.sources or db.sources[s[1]] ~= false then srcOn = srcOn + 1 end end
-		Print(format("phase |cffffd100%d %s|r  -  max diff |cffffd100%s|r  -  sources |cffffd100%d/%d|r on  -  weights %s",
-			db.phase, PhaseLabel(db.phase), DiffLabel(db.maxDiff),
+		Print(format("phase |cffffd100%d %s|r  -  raid |cffffd100%s|r / M+ |cffffd100%s|r  -  sources |cffffd100%d/%d|r on  -  weights %s",
+			db.phase, PhaseLabel(db.phase), DiffLabel(db.raidDiff), DiffLabel(db.mplusDiff),
 			srcOn, #SOURCE_BUCKETS,
 			IsSpecCustom() and "|cffcc66ffcustom|r" or "bisbeard"))
 		Print(format("alerts %s (top-%d or >=%g%% upgrade), tooltip %s",
@@ -3890,8 +3922,11 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
 		db.threshold = db.threshold or 10
 		db.minUpgradePct = db.minUpgradePct or 1
 		db.phase = db.phase or 1 -- default: Pre-Raid + Zul'Gurub (raise as you progress)
-		db.maxDiff = db.maxDiff or 5 -- default: Mythic+ (M+10 live since 2026-08-07)
-		if not db.mplusLaunch then db.maxDiff = 5; db.mplusLaunch = true end -- one-time bump to M+ at launch (incl. existing installs)
+		-- difficulty is split into two independent caps (raid gear vs dungeon/M+ gear);
+		-- migrate the old single db.maxDiff, then retire it.
+		db.raidDiff = db.raidDiff or (db.maxDiff and math.min(db.maxDiff, 4)) or 4  -- raid gear cap (Ascended default)
+		db.mplusDiff = db.mplusDiff or 5                                            -- dungeon/M+ gear cap (M+10 default)
+		db.maxDiff = nil
 		if db.includePvP == nil then db.includePvP = false end -- default: exclude PvP + Bloodforged
 		if db.excludeCrafted == nil then db.excludeCrafted = false end -- default: show crafted
 		if db.sources == nil then           -- per-source visibility (Sources panel)
@@ -3915,7 +3950,8 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
 				phaseLabels = {}, diffLabels = {}, maxPhase = 1, maxDiff = 5, dataVersion = "?" }
 		end
 		if db.phase > (D.maxPhase or 5) then db.phase = D.maxPhase or 5 end
-		if db.maxDiff > (D.maxDiff or 4) then db.maxDiff = D.maxDiff or 4 end
+		if db.raidDiff > 4 then db.raidDiff = 4 end
+		if db.mplusDiff > (D.maxDiff or 5) then db.mplusDiff = D.maxDiff or 5 end
 		if db.threshold > MERGE_DEPTH then db.threshold = MERGE_DEPTH end
 		db.userExtras = db.userExtras or {} -- [id] = {name,slot,stats,source}: personal /bb extra captures
 		MergeExtras()                       -- fold curated + personal supplement into D.items
