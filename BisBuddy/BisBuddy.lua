@@ -3931,11 +3931,15 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
 		if db.excludeCrafted == nil then db.excludeCrafted = false end -- default: show crafted
 		if db.sources == nil then           -- per-source visibility (Sources panel)
 			db.sources = { raid = true, dungeon = true, worldforged = true,
-				bloodforged = true, worldboss = true, reputation = true,
+				bloodforged = false, worldboss = true, reputation = true,
 				quest = true, crafted = true, vendor = true, events = true,
-				pvp = false }               -- PvP gear (resilience) hidden from PvE BiS by default
+				pvp = false }               -- PvP + Bloodforged gear (PvP-power = a PvE trap) hidden by default
 			if db.excludeCrafted then db.sources.crafted = false end   -- migrate old coarse toggles
 			if db.includePvP then db.sources.pvp = true end
+		end
+		if not db.bfHiddenByDefault then    -- one-time: force Bloodforged off (PvE trap, like PvP) for existing installs too
+			if db.sources then db.sources.bloodforged = false end
+			db.bfHiddenByDefault = true
 		end
 		if db.lootShare == nil then db.lootShare = true end -- default: answer group loot checks
 		db.sr = db.sr or { raid = "Naxxramas", count = 2, sortBy = "upgrade" } -- Reserve Planner state

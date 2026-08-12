@@ -200,7 +200,7 @@ def decode_chunk(data, index):
 CHUNK_CACHE = os.path.join(os.path.dirname(__file__), ".chunkcache")
 
 
-def fetch_items(manifest, cache_dir=CHUNK_CACHE):
+def fetch_items(manifest, cache_dir=CHUNK_CACHE, workers=8, throttle=0.0):
     """Fetch + decode all item chunks. Each chunk name is its own content hash,
     so decoded chunks are cached by name on disk: a re-scrape only downloads the
     chunks bisbeard actually changed (usually a handful, not all 28)."""
@@ -224,10 +224,12 @@ def fetch_items(manifest, cache_dir=CHUNK_CACHE):
             with open(cpath, "w") as fh:
                 json.dump(part, fh)
         stats["fetched"] += 1
+        if throttle:
+            time.sleep(throttle)
         return part
 
     items = []
-    with concurrent.futures.ThreadPoolExecutor(8) as ex:
+    with concurrent.futures.ThreadPoolExecutor(max(1, workers)) as ex:
         for part in ex.map(get, range(len(chunks))):
             items.extend(part)
     print(f"chunks: {stats['cached']} unchanged (from cache), {stats['fetched']} downloaded")
@@ -411,11 +413,34 @@ def build(weights, items, topn, prof=None, max_phase_cap=None):
                                  coded_stats(it), it.get("sourceCategory") or "",
                                  it.get("type") or "")
         cells[spec] = spec_cells
-    return cells, pool, phases, skipped_class
+
+    # FULL POOL: every usable, rankable item (>=1 weightable stat), so the addon can
+    # rank the ENTIRE available item set under user custom weights - not just the
+    # default-weight top-N union. Proficiency / phase / diff / source are filtered in
+    # the addon from each item's baked fields; the default `cells` are unchanged.
+    full_slot_pool = {}
+    for it in usable:
+        iphase = it.get("phase") if isinstance(it.get("phase"), int) else 1
+        if iphase > max_phase:
+            continue
+        tier = difficulty_tier(it)
+        if tier is None:            # unreleased M+ keystone (> RELEASED_MPLUS)
+            continue
+        cs = coded_stats(it)
+        if not cs:                  # no weightable stats -> unrankable by any weights
+            continue
+        iid = int(it["id"])
+        full_slot_pool.setdefault(it["slot"], set()).add(iid)
+        if iid not in pool:
+            src = (it.get("source") or "?")[:60]
+            pool[iid] = (it.get("name") or "?", it.get("version") or "", src,
+                         iphase, tier, item_category(it), cs,
+                         it.get("sourceCategory") or "", it.get("type") or "")
+    return cells, pool, phases, skipped_class, full_slot_pool
 
 
 def emit_lua(out_path, manifest, weights, cells, pool, phases, total_items, prof=None, specroles_ver="?",
-             enchants=None):
+             enchants=None, full_slot_pool=None):
     specAlias = {k.split("|")[1]: k for k in weights}
     lines = []
     push = lines.append
@@ -500,14 +525,19 @@ def emit_lua(out_path, manifest, weights, cells, pool, phases, total_items, prof
     # the addon can rank the WIDE usable pool when the user sets custom weights
     # (default weights still use bisbeard's curated cells; proficiency is applied in
     # the addon from each item's baked type = items[id][9]).
-    slot_pool = {}
-    for spec_cells in cells.values():
-        for phase_map in spec_cells.values():
-            for tier_map in phase_map.values():
-                for slot, rows in tier_map.items():
-                    bucket = slot_pool.setdefault(slot, set())
-                    for iid, _s in rows:
-                        bucket.add(iid)
+    # slotPool: the per-slot candidate set the addon re-ranks under custom weights.
+    # Prefer the FULL rankable pool (all available gear); fall back to the cells'
+    # default-ranked union if not provided.
+    slot_pool = full_slot_pool
+    if slot_pool is None:
+        slot_pool = {}
+        for spec_cells in cells.values():
+            for phase_map in spec_cells.values():
+                for tier_map in phase_map.values():
+                    for slot, rows in tier_map.items():
+                        bucket = slot_pool.setdefault(slot, set())
+                        for iid, _s in rows:
+                            bucket.add(iid)
     push("BisBuddyData.slotPool = {}")
     for slot in sorted(slot_pool):
         push("BisBuddyData.slotPool[%s] = {%s}" % (
@@ -531,6 +561,8 @@ def main():
     ap.add_argument("--phase", type=int, help="only rank items from phases <= N (default: all phases)")
     ap.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "..", "BisBuddy", "Data.lua"))
     ap.add_argument("--cache", help="dir with items_full.json + weights.json (skip downloads)")
+    ap.add_argument("--workers", type=int, default=8, help="concurrent chunk downloads (1 = gentle/sequential)")
+    ap.add_argument("--throttle", type=float, default=0.0, help="seconds to sleep after each downloaded chunk (politeness)")
     ap.add_argument("--check", action="store_true", help="only compare live data version vs current Data.lua")
     args = ap.parse_args()
 
@@ -576,13 +608,13 @@ def main():
         prof = parse_proficiency(src)
         print(f"parsed weights for {len(weights)} specs, "
               f"proficiency for {len(prof['weap'])} classes (specRolesVer {specroles_ver})")
-        items = fetch_items(manifest)
+        items = fetch_items(manifest, workers=args.workers, throttle=args.throttle)
         print(f"fetched {len(items)} items (version {live_ver}, published {manifest.get('publishedAt')})")
 
     if not prof or not prof.get("weap"):
         print("WARNING: no weapon/armor proficiency parsed - rankings will NOT be equip-filtered")
 
-    cells, pool, phases, skipped_class = build(weights, items, args.top, prof, args.phase)
+    cells, pool, phases, skipped_class, full_slot_pool = build(weights, items, args.top, prof, args.phase)
 
     # enchants (sourceCategory == "enchants"): keep those with weightable stats,
     # de-dup by (slot, name) preferring the richest-stat version.
@@ -606,7 +638,7 @@ def main():
           f"{sum(1 for it in items if it.get('sourceCategory') == 'enchants')} total)")
 
     n_ids = emit_lua(os.path.abspath(args.out), manifest, weights, cells, pool, phases, len(items), prof,
-                     specroles_ver, enchants)
+                     specroles_ver, enchants, full_slot_pool=full_slot_pool)
     size = os.path.getsize(os.path.abspath(args.out))
     print(f"wrote {args.out}: {len(cells)} specs x {len(phases)} phases x {len(DIFF_LABELS)} tiers, "
           f"{n_ids} unique ranked items, {size//1024} KB "

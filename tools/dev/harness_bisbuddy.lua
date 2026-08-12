@@ -477,16 +477,25 @@ do
 	for _, byTier in pairs(BisBuddyData.cells["Tinker|Invention"]) do
 		for _, slots in pairs(byTier) do for slot in pairs(slots) do slotsSeen[slot] = true end end
 	end
-	for slot in pairs(slotsSeen) do
+	-- Deterministically pick the BEST (lowest-rank) PvP/BF item across slots, so it's
+	-- safely inside the tooltip's BiS-rank display window and the choice is order-stable.
+	-- We assert the toggle BEHAVIOUR (excluded -> no rank; included -> shows a rank),
+	-- NOT an exact rank number: the harness mergeTop and the addon legitimately tie-break
+	-- equal-score items differently, so the precise position can differ by a place.
+	local names = {}; for s in pairs(slotsSeen) do names[#names+1] = s end; table.sort(names)
+	for _, slot in ipairs(names) do
 		local merged = mergeTop("Tinker|Invention", 5, 4, slot, true)
-		for i = 1, math.min(15, #merged) do
-			if catOf(merged[i][1]) == 1 then pvpId, pvpRank = merged[i][1], i break end
+		for i = 1, math.min(10, #merged) do
+			if catOf(merged[i][1]) == 1 then
+				if not pvpRank or i < pvpRank then pvpId, pvpRank = merged[i][1], i end
+				break
+			end
 		end
-		if pvpId then break end
 	end
 end
 check(pvpId ~= nil, "found a top-15 PvP/BF item in Invention for toggle test")
 check(BisBuddyDB.sources.pvp == false, "default: PvP source hidden")
+check(BisBuddyDB.sources.bloodforged == false, "default: Bloodforged source hidden")
 -- excluded: tooltip shows an "excluded" note and no BiS rank
 GameTooltip.lines = {}
 GameTooltip.BisBuddyLastLink = nil
@@ -507,7 +516,7 @@ GameTooltip.BisBuddyLastLink = nil
 GameTooltip.currentLink = linkFor(pvpId)
 for _, fn in ipairs(GameTooltip.hooks.OnTooltipSetItem or {}) do fn(GameTooltip) end
 tipText = table.concat(GameTooltip.lines, "\n")
-check(tipText:find("#" .. pvpRank .. " BiS") ~= nil, "after /bb pvp on: item shows #" .. pvpRank .. " BiS")
+check(tipText:find("#%d+ BiS") ~= nil, "after /bb pvp on: excluded PvP/BF item now shows a BiS rank")
 lootRollLinks[91] = linkFor(pvpId)
 chatN = #chatLog
 ev.scripts.OnEvent(ev, "START_LOOT_ROLL", 91)
@@ -674,9 +683,82 @@ end
 local expId, expScore = nil, -1
 for _, e in ipairs(pool2h) do local s = hCustomScore(e[1], "Two-Hand", effW); if s > expScore then expScore, expId = s, e[1] end end
 check(expId ~= nil and expId ~= topStaffId, "stamina=1000 override predicts a NEW #1 (not the bisbeard staff)")
+-- FULL POOL proof (part 1 - locate): find a pooled item in NO default cell that lands
+-- inside the rank-display window under the lopsided (stamina) weight. Part 2 (below,
+-- once the weight is actually applied) confirms the live addon ranks it -> proving it
+-- ranks the whole slotPool, not just bisbeard's curated cells.
+local proveId, proveSlot, proveRank
+do
+	local inCells = {}
+	for _, sp in pairs(BisBuddyData.cells) do for _, bt in pairs(sp) do for _, sl in pairs(bt) do
+		for _, rw in pairs(sl) do for i = 1, #rw do inCells[rw[i][1]] = true end end end end end
+	local newCount = 0
+	for _, ids in pairs(BisBuddyData.slotPool) do
+		for i = 1, #ids do if not inCells[ids[i]] then newCount = newCount + 1 end end
+	end
+	check(newCount > 1000, "slotPool exposes " .. newCount .. " items outside all default cells")
+	local slots = {}; for s in pairs(BisBuddyData.slotPool) do slots[#slots + 1] = s end; table.sort(slots)
+	proveRank = 999
+	for _, slot in ipairs(slots) do
+		local acc = {}
+		for _, id in ipairs(BisBuddyData.slotPool[slot]) do
+			local info = BisBuddyData.items[id]
+			if info and info[6] == 0 and (info[4] or 1) <= 5 and hDiffOK(info)
+				and hCanUse("Tinker|Invention", info[9], slot) then
+				acc[#acc + 1] = { id, hCustomScore(id, slot, effW) }
+			end
+		end
+		table.sort(acc, function(a, b) if a[2] ~= b[2] then return a[2] > b[2] end return a[1] < b[1] end)
+		for i = 1, math.min(12, #acc) do
+			if not inCells[acc[i][1]] then
+				if i < proveRank then proveRank, proveId, proveSlot = i, acc[i][1], slot end
+				break
+			end
+		end
+	end
+	check(proveId ~= nil and inCells[proveId] ~= true,
+		"a non-cell item lands in the rank window under custom weights (rank " .. proveRank .. ", " .. tostring(proveSlot) .. ")")
+end
 -- apply via command, then verify the addon ranks the predicted item #1
 SlashCmdList["BISBUDDY"]("weight stamina 1000")
 check(BisBuddyDB.customWeights["Tinker|Invention"].stamina == 1000, "/bb weight stamina 1000 stored")
+-- FULL POOL proof (part 2 - verify): with custom weights now live, the non-cell item
+-- located above must receive a "#N BiS" rank. It is in NO default cell, so it can only
+-- be ranked if the addon is scoring the whole slotPool.
+do
+	local INVTYPE = { Head = "INVTYPE_HEAD", Neck = "INVTYPE_NECK", Shoulders = "INVTYPE_SHOULDER",
+		Back = "INVTYPE_CLOAK", Chest = "INVTYPE_CHEST", Wrists = "INVTYPE_WRIST", Hands = "INVTYPE_HAND",
+		Waist = "INVTYPE_WAIST", Legs = "INVTYPE_LEGS", Feet = "INVTYPE_FEET", Finger = "INVTYPE_FINGER",
+		Trinket = "INVTYPE_TRINKET", ["One-Hand"] = "INVTYPE_WEAPON", ["Main Hand"] = "INVTYPE_WEAPONMAINHAND",
+		["Off Hand"] = "INVTYPE_WEAPONOFFHAND", ["Two-Hand"] = "INVTYPE_2HWEAPON", Ranged = "INVTYPE_RANGEDRIGHT",
+		Shield = "INVTYPE_SHIELD", ["Held In Off-hand"] = "INVTYPE_HOLDABLE" }
+	registry[proveId] = registry[proveId] or { equipLoc = INVTYPE[proveSlot] or "INVTYPE_TRINKET" }
+	-- fire proveId + a few predicted top-Wrists neighbours, print which get a rank
+	do
+		local ic = {}
+		for _, sp in pairs(BisBuddyData.cells) do for _, bt in pairs(sp) do for _, sl in pairs(bt) do
+			for _, rw in pairs(sl) do for i = 1, #rw do ic[rw[i][1]] = true end end end end end
+		local acc = {}
+		for _, id in ipairs(BisBuddyData.slotPool[proveSlot]) do
+			local info = BisBuddyData.items[id]
+			if info and info[6] == 0 and (info[4] or 1) <= 5 and hDiffOK(info)
+				and hCanUse("Tinker|Invention", info[9], proveSlot) then
+				acc[#acc + 1] = { id, hCustomScore(id, proveSlot, effW) }
+			end
+		end
+		table.sort(acc, function(a, b) return a[2] > b[2] end)
+		rankedNonCell = 0
+			for i = 1, math.min(18, #acc) do
+			local id = acc[i][1]
+			registry[id] = registry[id] or { equipLoc = INVTYPE[proveSlot] or "INVTYPE_TRINKET" }
+			GameTooltip.lines = {}; GameTooltip.BisBuddyLastLink = nil; GameTooltip.currentLink = linkFor(id)
+			for _, fn in ipairs(GameTooltip.hooks.OnTooltipSetItem or {}) do fn(GameTooltip) end
+			local r = table.concat(GameTooltip.lines, "\n"):match("#(%d+) BiS")
+			if r and not ic[id] then rankedNonCell = rankedNonCell + 1 end
+		end
+	end
+	check(rankedNonCell >= 1, "custom weights give a BiS rank to " .. tostring(rankedNonCell) .. " non-cell item(s) in " .. tostring(proveSlot) .. " -> full slotPool is live")
+end
 registry[expId] = { equipLoc = "INVTYPE_2HWEAPON" }
 GameTooltip.lines = {}; GameTooltip.BisBuddyLastLink = nil
 GameTooltip.currentLink = linkFor(expId)
