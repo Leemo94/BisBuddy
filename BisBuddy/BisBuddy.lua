@@ -240,7 +240,7 @@ local WEIGHT_STATS = {
 	{ "attackPower", "Attack Power" }, { "rangedAttackPower", "Ranged AP" }, { "armorPenetration", "Armor Pen" },
 	{ "weaponDps", "Weapon DPS" }, { "rangedDps", "Ranged DPS" },
 	{ "defense", "Defense" }, { "dodge", "Dodge" }, { "parry", "Parry" },
-	{ "block", "Block" }, { "blockValue", "Block Value" }, { "mp5", "MP5" },
+	{ "block", "Block" }, { "blockValue", "Block Value" }, { "mp5", "MP5" }, { "armor", "Armor" },
 }
 
 -- bisbeard slot -> inventory slot ids for the equipped baseline
@@ -1690,7 +1690,7 @@ local STAT_ALIASES = {
 	armorpen = "armorPenetration", wdps = "weaponDps", weapondps = "weaponDps",
 	rdps = "rangedDps", rangeddps = "rangedDps", def = "defense", defense = "defense",
 	dodge = "dodge", parry = "parry", block = "block", bv = "blockValue",
-	blockvalue = "blockValue", mp5 = "mp5",
+	blockvalue = "blockValue", mp5 = "mp5", armor = "armor", arm = "armor",
 }
 
 local function ResolveStatKey(name)
@@ -3776,6 +3776,27 @@ function BisBuddyLO.CenterMode(mode)
 	sw(f.setsPanel, mode == "sets")
 end
 
+-- Apply a weight edit live: debounced ~0.3s so typing "150" re-ranks once (not per keystroke).
+-- `now` = apply immediately (Enter / focus lost). The OnTextChanged userInput guard keeps
+-- ShowWeights re-SetTexting the other fields from re-triggering this.
+function BisBuddyLO.WCommit(key, text, now)
+	BisBuddyLO._wKey, BisBuddyLO._wText = key, text
+	local rf = BisBuddyLO.wTimer
+	if not rf then
+		rf = CreateFrame("Frame"); rf.t = 0
+		rf:SetScript("OnUpdate", function(self, e)
+			self.t = self.t + (e or 0)
+			if self.t >= 0.3 then
+				self:Hide(); self.t = 0
+				if BisBuddyLO._wKey then ApplyWeightEdit(BisBuddyLO._wKey, BisBuddyLO._wText); BisBuddyLO.ShowWeights() end
+			end
+		end)
+		BisBuddyLO.wTimer = rf
+	end
+	if now then rf:Hide(); rf.t = 0; ApplyWeightEdit(key, text); BisBuddyLO.ShowWeights()
+	else rf.t = 0; rf:Show() end
+end
+
 function BisBuddyLO.WRow(i)
 	local f = BisBuddyLO.panel
 	f.wRows = f.wRows or {}
@@ -3789,7 +3810,8 @@ function BisBuddyLO.WRow(i)
 	edit:SetPoint("TOPLEFT", x + 88, y + 2); edit:SetWidth(40); edit:SetHeight(16); edit:SetAutoFocus(false)
 	edit:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
 	edit:SetScript("OnEscapePressed", function(self) self:ClearFocus(); BisBuddyLO.ShowWeights() end)
-	edit:SetScript("OnEditFocusLost", function(self) ApplyWeightEdit(self.key, self:GetText()); BisBuddyLO.ShowWeights() end)
+	edit:SetScript("OnEditFocusLost", function(self) BisBuddyLO.WCommit(self.key, self:GetText(), true) end)
+	edit:SetScript("OnTextChanged", function(self, userInput) if userInput then BisBuddyLO.WCommit(self.key, self:GetText()) end end)   -- live, no Enter needed
 	f.wRows[i] = { lbl = lbl, edit = edit }
 	return f.wRows[i]
 end
