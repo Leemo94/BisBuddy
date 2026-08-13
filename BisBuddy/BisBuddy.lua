@@ -3986,6 +3986,7 @@ function BisBuddyLO.Render()
 	local e2, b2 = BisBuddyLO.RenderCol(f.rightCol, BisBuddyLO.RIGHT, bagIds, bagByName)
 	f.header:SetText(format("|cffffd100%s|r  \226\128\148  Current |cff35c94a%d|r  /  BiS |cffffd100%d|r",
 		(strmatch(specKey, "|(.+)$") or specKey), math.floor(e1 + e2 + 0.5), math.floor(b1 + b2 + 0.5)))
+	if f.specDD then f.specDD:SetText(specKey and ("Spec: " .. (strmatch(specKey, "|(.+)$") or specKey)) or "pick your spec") end
 	if f.phaseDD then f.phaseDD:SetText("Phase: " .. db.phase) end
 	if f.raidDD then f.raidDD:SetText("Raid: " .. DiffLabel(db.raidDiff)) end
 	if f.mplusDD then f.mplusDD:SetText("M+: " .. DiffLabel(db.mplusDiff)) end
@@ -4057,6 +4058,29 @@ function BisBuddyLO.Create()
 	f.mplusDD:SetPoint("LEFT", f.raidDD, "RIGHT", 6, 0)
 	f.mplusDD:SetBuilder(function(add)   -- dungeon tiers: Normal/Heroic/Mythic/M+10 (no Ascended)
 		for _, n in ipairs({ 1, 2, 3, 5 }) do add(DiffLabel(n), function() SetDiff("mplus", n, true) end, db.mplusDiff == n) end
+	end)
+	-- spec picker in the top-row band above the difficulty dropdowns (drives every ranking;
+	-- nested class -> spec, same navigation as the setup panel). Re-ranks live on pick.
+	f.specDD = MakeDropdown(f, "BisBuddyLoSpecDD", 220)
+	f.specDD:SetPoint("TOPLEFT", 250, -8)   -- top-row band; clears the Phase row at -35 (26px tall)
+	f.specDD:SetBuilder(function(add)
+		local dd = f.specDD
+		if not dd.navState then                          -- level 1: pick a class
+			for _, entry in ipairs(ClassSpecTree()) do
+				local class = entry.class
+				add(class .. "  |cff888888>|r", function() dd.navState = class end, false, true)
+			end
+		else                                             -- level 2: pick a spec in that class
+			add("|cff888888< back|r", function() dd.navState = nil end, false, true)
+			for _, entry in ipairs(ClassSpecTree()) do
+				if entry.class == dd.navState then
+					for _, s in ipairs(entry.specs) do
+						local key = s.key
+						add(s.spec, function() dd.navState = nil; SelectSpec(key); BisBuddyLO.Render() end, specKey == key)
+					end
+				end
+			end
+		end
 	end)
 	f.leftCol = CreateFrame("Frame", nil, f); f.leftCol:SetPoint("TOPLEFT", 14, -64); f.leftCol:SetWidth(300); f.leftCol:SetHeight(390)
 	f.rightCol = CreateFrame("Frame", nil, f); f.rightCol:SetPoint("TOPRIGHT", -14, -64); f.rightCol:SetWidth(300); f.rightCol:SetHeight(390)
