@@ -3596,8 +3596,17 @@ function BisBuddyLO.ListRow(i)
 	r.text = r:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); r.text:SetPoint("LEFT", 2, 0); r.text:SetJustifyH("LEFT")
 	r:SetScript("OnEnter", function(self) if self.itemId then GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:SetHyperlink("item:" .. self.itemId); GameTooltip:Show() end end)
 	r:SetScript("OnLeave", function() GameTooltip:Hide() end)
-	r:SetScript("OnClick", function(self)
+	r:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+	r:SetScript("OnClick", function(self, button)
 		if not self.itemId then return end
+		if button == "RightButton" then                     -- right-click a multi-version row -> expand its difficulties
+			if self.expandKey then
+				BisBuddyLO.loExpanded = BisBuddyLO.loExpanded or {}
+				BisBuddyLO.loExpanded[self.expandKey] = not BisBuddyLO.loExpanded[self.expandKey]
+				BisBuddyLO.ShowList(BisBuddyLO.sel, BisBuddyLO.selIv)
+			end
+			return
+		end
 		if IsControlKeyDown() then
 			local link = select(2, GetItemInfo(self.itemId))
 			if link and DressUpItemLink then DressUpItemLink(link) end
@@ -3643,32 +3652,53 @@ function BisBuddyLO.ShowList(bslot, iv)
 	f.listTitle:SetText(format("|cffffd100%s|r%s", (BROWSE_SLOT_LABEL[bslot] or bslot), now))
 	local list = BisBuddyLO.MergedRanks(bslot)
 	local base = BaselineForSlot(bslot)
-	local seenName, order = {}, {}                          -- best variant per item name (score-sorted list)
+	local groups, order = {}, {}                            -- collapse difficulty/version variants under one item name
 	if list then
 		for i = 1, #list do
 			local id = list[i][1]
 			local info = D.items[id]
 			local nm = (info and info[1]) or ("item " .. id)
-			if not seenName[nm] and #order < 14 then
-				seenName[nm] = true
-				order[#order + 1] = { id = id, name = nm, score = list[i][2], info = info }
-			end
+			local g = groups[nm]
+			if not g and #order < 14 then g = { name = nm, variants = {} }; groups[nm] = g; order[#order + 1] = g end
+			if g and #g.variants < 12 then g.variants[#g.variants + 1] = { id = id, score = list[i][2], info = info } end
 		end
 	end
 	local tgt = db and db.loTargets and db.loTargets[iv]
 	if f.listRows then for _, r in ipairs(f.listRows) do r:Hide() end end
-	for i = 1, #order do
-		local g = order[i]
-		local r = BisBuddyLO.ListRow(i)
-		r.itemId = g.id
-		local up = (base and g.score > base) and "|cff20ff20^|r " or "   "
-		local mark = (tgt == g.id) and "|cffffd100\226\152\133|r " or format("|cff999999%2d|r ", i)
-		local rv = BisBuddyLO.RichVer(g.info)
+	local shown = 0
+	for gi = 1, #order do
+		if shown >= 22 then break end
+		local g = order[gi]
+		local best, nvar = g.variants[1], #g.variants
+		local key = bslot .. "\0" .. g.name
+		local expanded = BisBuddyLO.loExpanded and BisBuddyLO.loExpanded[key]
+		shown = shown + 1
+		local r = BisBuddyLO.ListRow(shown)
+		r.itemId = best.id
+		r.expandKey = (nvar > 1) and key or nil
+		local up = (base and best.score > base) and "|cff20ff20^|r " or "   "
+		local mark = (tgt == best.id) and "|cffffd100\226\152\133|r " or format("|cff999999%2d|r ", gi)
+		local rv = BisBuddyLO.RichVer(best.info)
 		local ver = (rv ~= "") and (" |cff888888" .. rv .. "|r") or ""
-		r.text:SetText(format("%s%s%s%s|r%s  |cff69ccf0%.0f|r", up, mark, ItemHex(g.id), Clip(g.name, 20), ver, g.score))
+		local badge = (nvar > 1) and (expanded and "  |cff54a5ff[-]|r" or format("  |cff54a5ff[+%d]|r", nvar - 1)) or ""
+		r.text:SetText(format("%s%s%s%s|r%s  |cff69ccf0%.0f|r%s", up, mark, ItemHex(best.id), Clip(g.name, 18), ver, best.score, badge))
 		r:Show()
+		if expanded and nvar > 1 then
+			for vi = 2, nvar do
+				if shown >= 22 then break end
+				local v = g.variants[vi]
+				shown = shown + 1
+				local vr = BisBuddyLO.ListRow(shown)
+				vr.itemId = v.id
+				vr.expandKey = nil
+				local vmark = (tgt == v.id) and "|cffffd100\226\152\133|r " or "    "
+				local vrv = BisBuddyLO.RichVer(v.info)
+				vr.text:SetText(format("      %s|cffbfbfbf%s|r  |cff69ccf0%.0f|r", vmark, (vrv ~= "" and vrv) or "?", v.score))
+				vr:Show()
+			end
+		end
 	end
-	if f.listHint then f.listHint:SetText("|cff707070click = set goal (\226\152\133)  \194\183  ctrl = preview  \194\183  shift = link|r") end
+	if f.listHint then f.listHint:SetText("|cff707070click = goal (\226\152\133)  \194\183  R-click = versions  \194\183  ctrl = preview|r") end
 	if #order == 0 then f.listTitle:SetText((f.listTitle:GetText() or "") .. "  |cff808080(no items)|r") end
 end
 
