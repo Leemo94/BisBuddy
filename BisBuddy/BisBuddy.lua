@@ -4781,7 +4781,11 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
 		if db.tooltip == nil then db.tooltip = true end
 		db.threshold = db.threshold or 10
 		db.minUpgradePct = db.minUpgradePct or 1
-		db.phase = db.phase or 1 -- default: Pre-Raid + Zul'Gurub (raise as you progress)
+		db.phase = db.phase or 2 -- default: Phase 2 (Molten Core) - un-gates M+10 dungeon gear (tagged phase 2)
+		if not db.phaseBumped then   -- one-time: nudge the old Phase-1 default up to 2 so M+10 gear shows
+			if db.phase == 1 then db.phase = 2 end
+			db.phaseBumped = true
+		end
 		db.loTargets = db.loTargets or {}  -- loadout: pinned goal item per inv slot (iv -> itemId)
 		-- difficulty is split into two independent caps (raid gear vs dungeon/M+ gear);
 		-- migrate the old single db.maxDiff, then retire it.
