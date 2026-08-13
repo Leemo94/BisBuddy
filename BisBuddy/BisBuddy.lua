@@ -3404,8 +3404,11 @@ function BisBuddyLO.TargetFor(bslot, excludeName)
 		a, b = nth("Held In Off-hand", 1); if b > ohSc then ohId, ohSc = a, b end
 		a, b = nth("Shield", 1); if b > ohSc then ohId, ohSc = a, b end
 		local thId, thSc = nth("Two-Hand", 1)
-		if thSc > (mhSc + ohSc) then
-			if bslot == "Main Hand" then return thId, thSc else return nil, 0, true end
+		-- weaponView: nil = auto (best total wins), "2h" or "1h" force the setup
+		local view = BisBuddyLO.weaponView
+		local use2H = (view == "2h") or (view ~= "1h" and thSc > (mhSc + ohSc))
+		if use2H then
+			if bslot == "Main Hand" then return thId, thSc, "2h" else return nil, 0, "covered" end
 		else
 			if bslot == "Main Hand" then return mhId, mhSc else return ohId, ohSc end
 		end
@@ -3529,10 +3532,10 @@ function BisBuddyLO.RenderCol(col, idxList, bagIds, bagByName)
 	for pos, gi in ipairs(idxList) do
 		local gs = GEAR_SLOTS[gi]
 		local iv, label, bslot = gs[1], gs[2], gs[3]
-		local tid, tscore, used2H = BisBuddyLO.TargetFor(bslot, usedName[bslot])   -- Ring 2 / Trinket 2 skip slot-1's item
+		local tid, tscore, wflag = BisBuddyLO.TargetFor(bslot, usedName[bslot])   -- wflag: "2h" main / "covered" off-hand
 		local manual = db and db.loTargets and db.loTargets[iv]
 		if manual and D.items[manual] then                                        -- user pinned a goal for this slot
-			tid, used2H = manual, nil
+			tid, wflag = manual, nil
 			tscore = (rankIndex[manual] and rankIndex[manual].score) or tscore
 		end
 		local eqLink = GetInventoryItemLink("player", iv)
@@ -3544,7 +3547,7 @@ function BisBuddyLO.RenderCol(col, idxList, bagIds, bagByName)
 		local ownExact = (tid and bagIds[tid] and eqId ~= tid) or false   -- BiS itself sitting in bags
 		local alt = tname and bagByName[tname]                             -- a same-name (diff-difficulty) copy in bags
 		local ownAny = (alt and alt.id ~= tid and alt.id ~= eqId) or false
-		local status = used2H and "none" or BisBuddyLO.Classify(eqId, tid, ownExact, ownAny, eqRank, false)
+		local status = (wflag == "covered") and "none" or BisBuddyLO.Classify(eqId, tid, ownExact, ownAny, eqRank, false)
 		local cell = BisBuddyLO.Cell(col, pos)
 		cell.itemId = tid or eqId
 		cell.bslot, cell.iv = bslot, iv
@@ -3561,11 +3564,15 @@ function BisBuddyLO.RenderCol(col, idxList, bagIds, bagByName)
 			cell.nmFS:SetText("|cffb0b0b0" .. label .. "|r")
 		end
 		local delta = math.floor((tscore - (eqScore or 0)) + 0.5)
+		if wflag == "2h" then   -- a 2H replaces both weapons, so the upgrade also gives up your off-hand
+			local ohl = GetInventoryItemLink("player", 17)
+			delta = math.floor((tscore - (eqScore or 0) - (ohl and ScoreLink(ohl) or 0)) + 0.5)
+		end
 		local en = (eqId and D.items[eqId] and D.items[eqId][1]) or (eqLink and GetItemInfo(eqLink)) or "your item"
 		local tier = eqLink and BisBuddyLO.TierOf(eqLink)
 		local tstr = tier and (" |cff888888(" .. tier .. ")|r") or ""
 		local line
-		if used2H then
+		if wflag == "covered" then
 			line = "|cff808080covered by your 2-handed BiS|r"
 		elseif status == "none" then
 			line = eqLink and ("|cff808080Current " .. Clip(en, 20) .. (tier and (" (" .. tier .. ")") or "") .. " (no BiS data)|r") or ("|cff808080" .. label .. " \226\128\148 no BiS data|r")
@@ -3665,6 +3672,8 @@ function BisBuddyLO.ShowList(bslot, iv)
 		end
 	end
 	local tgt = db and db.loTargets and db.loTargets[iv]
+	local eqIds, bagIds = BisBuddyLO.eqIds or {}, BisBuddyLO.bagIds or {}
+	local function ownMark(id) return eqIds[id] and "|cff35c94a\226\151\143|r " or (bagIds[id] and "|cffe0a422\226\151\134|r " or "") end
 	if f.listRows then for _, r in ipairs(f.listRows) do r:Hide() end end
 	local shown = 0
 	for gi = 1, #order do
@@ -3682,7 +3691,7 @@ function BisBuddyLO.ShowList(bslot, iv)
 		local rv = BisBuddyLO.RichVer(best.info)
 		local ver = (rv ~= "") and (" |cff888888" .. rv .. "|r") or ""
 		local badge = (nvar > 1) and (expanded and "  |cff54a5ff[-]|r" or format("  |cff54a5ff[+%d]|r", nvar - 1)) or ""
-		r.text:SetText(format("%s%s%s%s|r%s  |cff69ccf0%.0f|r%s", up, mark, ItemHex(best.id), Clip(g.name, 18), ver, best.score, badge))
+		r.text:SetText(format("%s%s%s%s%s|r%s  |cff69ccf0%.0f|r%s", up, mark, ownMark(best.id), ItemHex(best.id), Clip(g.name, 16), ver, best.score, badge))
 		r:Show()
 		if expanded and nvar > 1 then
 			for vi = 2, nvar do
@@ -3694,12 +3703,12 @@ function BisBuddyLO.ShowList(bslot, iv)
 				vr.expandKey = nil
 				local vmark = (tgt == v.id) and "|cffffd100\226\152\133|r " or "    "
 				local vrv = BisBuddyLO.RichVer(v.info)
-				vr.text:SetText(format("      %s|cffbfbfbf%s|r  |cff69ccf0%.0f|r", vmark, (vrv ~= "" and vrv) or "?", v.score))
+				vr.text:SetText(format("      %s%s|cffbfbfbf%s|r  |cff69ccf0%.0f|r", vmark, ownMark(v.id), (vrv ~= "" and vrv) or "?", v.score))
 				vr:Show()
 			end
 		end
 	end
-	if f.listHint then f.listHint:SetText("|cff707070click = goal (\226\152\133)  \194\183  R-click = versions  \194\183  ctrl = preview|r") end
+	if f.listHint then f.listHint:SetText("|cff35c94a\226\151\143|r worn  |cffe0a422\226\151\134|r bags  \194\183  click = goal  \194\183  R-click = versions") end
 	if #order == 0 then f.listTitle:SetText((f.listTitle:GetText() or "") .. "  |cff808080(no items)|r") end
 end
 
@@ -3830,10 +3839,25 @@ function BisBuddyLO.Render()
 			end
 		end
 	end
+	local eqIds = {}
+	for iv2 = 1, 18 do local lk = GetInventoryItemLink("player", iv2); local eid = lk and ItemIdFromLink(lk); if eid then eqIds[eid] = true end end
+	BisBuddyLO.bagIds, BisBuddyLO.eqIds = bagIds, eqIds   -- the item list marks worn ● / in-bags ◆
 	local e1, b1 = BisBuddyLO.RenderCol(f.leftCol, BisBuddyLO.LEFT, bagIds, bagByName)
 	local e2, b2 = BisBuddyLO.RenderCol(f.rightCol, BisBuddyLO.RIGHT, bagIds, bagByName)
 	f.header:SetText(format("|cffffd100%s|r  \226\128\148  Current |cff35c94a%d|r  /  BiS |cffffd100%d|r",
 		(strmatch(specKey, "|(.+)$") or specKey), math.floor(e1 + e2 + 0.5), math.floor(b1 + b2 + 0.5)))
+	if f.wpnBtn then   -- weapon-view toggle: only when the spec has BOTH a 2H and a 1H/off-hand option
+		local hasTwo = activeSlotRanks["Two-Hand"] and #activeSlotRanks["Two-Hand"] > 0
+		local hasOne = (activeSlotRanks["One-Hand"] and #activeSlotRanks["One-Hand"] > 0)
+			or (activeSlotRanks["Main Hand"] and #activeSlotRanks["Main Hand"] > 0)
+		if hasTwo and hasOne then
+			local v = BisBuddyLO.weaponView
+			f.wpnBtn:SetText(v == "2h" and "Weapons: 2H" or (v == "1h" and "Weapons: 1H+OH") or "Weapons: Auto")
+			f.wpnBtn:Show()
+		else
+			f.wpnBtn:Hide()
+		end
+	end
 	if BisBuddyLO.sel then BisBuddyLO.ShowList(BisBuddyLO.sel, BisBuddyLO.selIv) end   -- keep the open slot list fresh
 	if BisBuddyLO._uncached and (BisBuddyLO._retries or 0) < 10 then
 		BisBuddyLO._retries = (BisBuddyLO._retries or 0) + 1
@@ -3857,6 +3881,13 @@ function BisBuddyLO.Create()
 	local close = CreateFrame("Button", nil, f, "UIPanelCloseButton"); close:SetPoint("TOPRIGHT", -6, -6)
 	f.header = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	f.header:SetPoint("TOPLEFT", 18, -40); f.header:SetJustifyH("LEFT")
+	f.wpnBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+	f.wpnBtn:SetWidth(120); f.wpnBtn:SetHeight(18); f.wpnBtn:SetPoint("TOPRIGHT", -14, -38); f.wpnBtn:SetText("Weapons: Auto"); f.wpnBtn:Hide()
+	f.wpnBtn:SetScript("OnClick", function()
+		local v = BisBuddyLO.weaponView
+		BisBuddyLO.weaponView = (v == nil and "2h") or (v == "2h" and "1h") or nil   -- Auto -> 2H -> 1H+OH -> Auto
+		BisBuddyLO.Render()
+	end)
 	f.leftCol = CreateFrame("Frame", nil, f); f.leftCol:SetPoint("TOPLEFT", 14, -64); f.leftCol:SetWidth(300); f.leftCol:SetHeight(390)
 	f.rightCol = CreateFrame("Frame", nil, f); f.rightCol:SetPoint("TOPRIGHT", -14, -64); f.rightCol:SetWidth(300); f.rightCol:SetHeight(390)
 	f.center = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
