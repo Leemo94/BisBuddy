@@ -3693,7 +3693,7 @@ function BisBuddyLO.Render()
 	local f = BisBuddyLO.panel
 	if not f or not f:IsShown() then return end
 	if not specKey then
-		f.header:SetText("|cffff2020No spec set|r - open BisBuddy (/bb) and pick your spec.")
+		f.header:SetText("|cffff2020No spec set|r - click |cffffd100Settings|r below to pick your spec.")
 		return
 	end
 	wipe(equippedScoreCache)
@@ -3726,7 +3726,7 @@ end
 function BisBuddyLO.Create()
 	if BisBuddyLO.panel then return BisBuddyLO.panel end
 	local f = CreateFrame("Frame", "BisBuddyLoadoutFrame", UIParent)
-	f:SetWidth(920); f:SetHeight(470); f:SetPoint("CENTER"); f:SetFrameStrata("DIALOG")
+	f:SetWidth(920); f:SetHeight(510); f:SetPoint("CENTER"); f:SetFrameStrata("DIALOG")
 	StyleDialog(f)
 	f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
 	f:SetScript("OnDragStart", f.StartMoving)
@@ -3747,6 +3747,16 @@ function BisBuddyLO.Create()
 	f.listTitle:SetPoint("TOPLEFT", 4, -2); f.listTitle:SetPoint("RIGHT", -4, 0); f.listTitle:SetJustifyH("LEFT")
 	f.listHint = f.list:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 	f.listHint:SetPoint("BOTTOMLEFT", 4, 8); f.listHint:SetJustifyH("LEFT")
+	-- control bar: the loadout is the home screen, so the other panels are reachable from here
+	local BAR = { { "Settings", "setup" }, { "Weights", "weights" }, { "Reserve", "sr" }, { "Sources", "sources" }, { "BiS Lists", "list" }, { "Talents", "talents" } }
+	local bx = 14
+	for _, b in ipairs(BAR) do
+		local btn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+		btn:SetWidth(96); btn:SetHeight(22); btn:SetPoint("BOTTOMLEFT", bx, 12); btn:SetText(b[1])
+		local arg = b[2]
+		btn:SetScript("OnClick", function() SlashCmdList["BISBUDDY"](arg) end)
+		bx = bx + 100
+	end
 	f:Hide()
 	BisBuddyLO.panel = f
 	return f
@@ -4289,8 +4299,10 @@ SlashCmdList["BISBUDDY"] = function(msg)
 			Print(bbExtraLine)
 			if StaticPopup_Show then StaticPopup_Show("BISBUDDY_EXTRA") end
 		end
+	elseif cmd == "setup" or cmd == "config" then
+		ToggleMainPanel()                 -- the spec / phase / difficulty setup GUI
 	elseif cmd == "" then
-		ToggleMainPanel()                 -- /bb with no argument opens the setup GUI
+		BisBuddyLO.Toggle()               -- /bb opens the Loadout (home screen); setup is behind the button
 	else
 		RefreshSpec(true)
 		Print(format("data %s (published %s, %d items) - spec: %s",
