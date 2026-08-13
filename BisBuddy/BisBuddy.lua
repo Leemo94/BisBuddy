@@ -3677,6 +3677,18 @@ function BisBuddyLO.ShowList(bslot, iv)
 			eqTier and (" |cff888888" .. eqTier .. "|r") or "", math.floor((eqScore or 0) + 0.5))
 	end
 	f.listTitle:SetText(format("|cffffd100%s|r%s", (BROWSE_SLOT_LABEL[bslot] or bslot), now))
+	-- weapon-view guidance shown in the middle when a weapon / off-hand slot is open
+	local wpNote, listY0 = nil, 24
+	if bslot == "Main Hand" or bslot == "Off Hand" then
+		local v = BisBuddyLO.weaponView
+		if v == "2h" then wpNote, listY0 = "Only showing 2-handers.", 40
+		elseif v == "1h" then wpNote, listY0 = "Not showing 2-handers (1H + off-hand).", 40
+		else wpNote, listY0 = "Ranked by stat value, so 2Hs sit on top as single items \226\128\148 weigh your best 1H+OH combined vs the top 2H (see the totals up top).", 62 end
+	end
+	if f.listNote then
+		if wpNote then f.listNote:SetText("|cff9a94a6" .. wpNote .. "|r"); f.listNote:Show() else f.listNote:SetText(""); f.listNote:Hide() end
+	end
+	local maxShown = math.min(22, math.max(6, math.floor((372 - listY0) / 17)))
 	local list = BisBuddyLO.MergedRanks(bslot)
 	local base = BaselineForSlot(bslot)
 	local groups, order = {}, {}                            -- collapse difficulty/version variants under one item name
@@ -3696,13 +3708,14 @@ function BisBuddyLO.ShowList(bslot, iv)
 	if f.listRows then for _, r in ipairs(f.listRows) do r:Hide() end end
 	local shown = 0
 	for gi = 1, #order do
-		if shown >= 22 then break end
+		if shown >= maxShown then break end
 		local g = order[gi]
 		local best, nvar = g.variants[1], #g.variants
 		local key = bslot .. "\0" .. g.name
 		local expanded = BisBuddyLO.loExpanded and BisBuddyLO.loExpanded[key]
 		shown = shown + 1
 		local r = BisBuddyLO.ListRow(shown)
+		r:ClearAllPoints(); r:SetPoint("TOPLEFT", f.list, "TOPLEFT", 2, -listY0 - (shown - 1) * 17); r:SetPoint("RIGHT", f.list, "RIGHT", -2, 0)
 		r.itemId = best.id
 		r.expandKey = (nvar > 1) and key or nil
 		local up = (base and best.score > base) and "|cff20ff20^|r " or "   "
@@ -3714,10 +3727,11 @@ function BisBuddyLO.ShowList(bslot, iv)
 		r:Show()
 		if expanded and nvar > 1 then
 			for vi = 2, nvar do
-				if shown >= 22 then break end
+				if shown >= maxShown then break end
 				local v = g.variants[vi]
 				shown = shown + 1
 				local vr = BisBuddyLO.ListRow(shown)
+				vr:ClearAllPoints(); vr:SetPoint("TOPLEFT", f.list, "TOPLEFT", 2, -listY0 - (shown - 1) * 17); vr:SetPoint("RIGHT", f.list, "RIGHT", -2, 0)
 				vr.itemId = v.id
 				vr.expandKey = nil
 				local vmark = (tgt == v.id) and "|cffffd100\226\152\133|r " or "    "
@@ -4079,6 +4093,8 @@ function BisBuddyLO.Create()
 	f.list:SetBackdropBorderColor(0.17, 0.17, 0.21, 1)
 	f.listTitle = f.list:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 	f.listTitle:SetPoint("TOPLEFT", 4, -2); f.listTitle:SetPoint("RIGHT", -4, 0); f.listTitle:SetJustifyH("LEFT")
+	f.listNote = f.list:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")   -- weapon-view guidance
+	f.listNote:SetPoint("TOPLEFT", 5, -19); f.listNote:SetPoint("RIGHT", -5, 0); f.listNote:SetJustifyH("LEFT")
 	f.listHint = f.list:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 	f.listHint:SetPoint("BOTTOMLEFT", 4, 8); f.listHint:SetJustifyH("LEFT")
 
