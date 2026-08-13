@@ -472,6 +472,7 @@ local function BuildRankIndex()
 	if RenderEnchants then RenderEnchants() end  -- and the Best Enchants panel
 	if RenderGear then RenderGear() end          -- and the My Gear panel
 	if RenderSR then RenderSR() end              -- and the Reserve Planner
+	if BisBuddyLO and BisBuddyLO.Render then BisBuddyLO.Render() end   -- and the Loadout screen
 end
 
 -- forgiving spec-name lookup: matches the bisbeard spec name, the full
@@ -3463,6 +3464,33 @@ function BisBuddyLO.TierOf(link)
 	return tier
 end
 
+-- Unambiguous version label. Raid drops get their raid ("Mythic MC"); worldforged gear gets
+-- "WF <tier>" so a worldforge "Onyxia" no longer reads like an Onyxia raid drop. Others unchanged.
+BisBuddyLO.RAID_ABBREV = {
+	["Molten Core"] = "MC", ["Blackwing Lair"] = "BWL", ["Naxxramas"] = "Naxx",
+	["Onyxia"] = "Ony", ["Onyxia's Lair"] = "Ony",
+	["Temple of Ahn'Qiraj"] = "AQ40", ["AQ40"] = "AQ40", ["AQ20"] = "AQ20",
+	["Zul'Gurub"] = "ZG", ["ZG Set"] = "ZG", ["ZG Sets"] = "ZG", ["Zul'Gurub Sets"] = "ZG",
+	["Tier 1"] = "MC", ["Tier 2"] = "BWL", ["Tier 2.5"] = "AQ40", ["Tier 3"] = "Naxx",
+}
+BisBuddyLO.FORGE_ABBREV = {
+	["Pre-Raid"] = "PR", ["Ragnaros"] = "MC", ["Onyxia"] = "Ony", ["Nefarion"] = "BWL",
+	["Nefarian"] = "BWL", ["Hakkar"] = "ZG", ["C'thun"] = "AQ40", ["Kel'Thuzad"] = "Naxx",
+}
+function BisBuddyLO.RichVer(info)
+	if not info then return "" end
+	local ver, cat, src = info[2] or "", info[8] or "", info[3] or ""
+	if ver == "" then return "" end
+	if cat == "worldforged" then
+		return "WF " .. (BisBuddyLO.FORGE_ABBREV[ver] or ver)
+	elseif cat == "raid" then
+		local raid = src:match("^(.-)%s*%-") or src
+		local ab = BisBuddyLO.RAID_ABBREV[raid] or BisBuddyLO.RAID_ABBREV[ver]
+		return ab and (ver .. " " .. ab) or (ver .. " Raid")
+	end
+	return ver
+end
+
 function BisBuddyLO.Cell(col, idx)
 	col.cells = col.cells or {}
 	if col.cells[idx] then return col.cells[idx] end
@@ -3581,6 +3609,7 @@ function BisBuddyLO.ListRow(i)
 		db.loTargets = db.loTargets or {}
 		if db.loTargets[iv] == self.itemId then db.loTargets[iv] = nil else db.loTargets[iv] = self.itemId end  -- toggle goal
 		BisBuddyLO.Render()                                                            -- repaints cells + re-shows the list
+		if RenderSR then RenderSR() end                                               -- keep an open Reserve Planner in sync
 	end)
 	f.listRows[i] = r
 	return r
@@ -3630,7 +3659,8 @@ function BisBuddyLO.ShowList(bslot, iv)
 		r.itemId = g.id
 		local up = (base and g.score > base) and "|cff20ff20^|r " or "   "
 		local mark = (tgt == g.id) and "|cffffd100\226\152\133|r " or format("|cff999999%2d|r ", i)
-		local ver = (g.info and g.info[2] and g.info[2] ~= "") and (" |cff888888" .. g.info[2] .. "|r") or ""
+		local rv = BisBuddyLO.RichVer(g.info)
+		local ver = (rv ~= "") and (" |cff888888" .. rv .. "|r") or ""
 		r.text:SetText(format("%s%s%s%s|r%s  |cff69ccf0%.0f|r", up, mark, ItemHex(g.id), Clip(g.name, 20), ver, g.score))
 		r:Show()
 	end
