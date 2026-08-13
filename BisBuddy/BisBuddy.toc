@@ -2,7 +2,7 @@
 ## Title: BisBuddy
 ## Notes: BisBeard (coa.bisbeard.com) BiS ranks and upgrade hints on tooltips and loot drops. Type /bb
 ## Author: Leemo
-## Version: 1.9.9-dev
+## Version: 1.9.10-dev
 ## SavedVariables: BisBuddyDB
 
 Data.lua

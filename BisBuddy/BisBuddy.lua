@@ -3383,17 +3383,27 @@ end
 
 -- BiS target {id, score} for a gear slot, unioning weapon / off-hand variants
 -- (caster off-hands are "Held In Off-hand"/"Shield", not the "Off Hand" weapon key).
-function BisBuddyLO.TargetFor(bslot)
-	local cands
-	if bslot == "Main Hand" then cands = { "Main Hand", "One-Hand", "Two-Hand" }
-	elseif bslot == "Off Hand" then cands = { "Off Hand", "Held In Off-hand", "Shield", "One-Hand" }
-	else cands = { bslot } end
-	local bId, bSc
-	for _, s in ipairs(cands) do
-		local e = activeSlotRanks[s]; e = e and e[1]
-		if e and (not bSc or e[2] > bSc) then bId, bSc = e[1], e[2] end
+-- n = which rank to show (Ring 2 / Trinket 2 show the 2nd-best, not a duplicate of #1).
+-- Weapons decide 1H+off-hand vs 2H as a unit: if the best 2H beats best-1H + best-off-hand,
+-- the 2H fills Main Hand and Off Hand is flagged "covered by your 2-hander" (3rd return).
+function BisBuddyLO.TargetFor(bslot, n)
+	n = n or 1
+	local ar = activeSlotRanks
+	local function nth(s, k) local l = ar[s]; local e = l and l[k]; if e then return e[1], e[2] else return nil, 0 end end
+	if bslot == "Main Hand" or bslot == "Off Hand" then
+		local mhId, mhSc = nth("Main Hand", 1)
+		local a, b = nth("One-Hand", 1); if b > mhSc then mhId, mhSc = a, b end
+		local ohId, ohSc = nth("Off Hand", 1)
+		a, b = nth("Held In Off-hand", 1); if b > ohSc then ohId, ohSc = a, b end
+		a, b = nth("Shield", 1); if b > ohSc then ohId, ohSc = a, b end
+		local thId, thSc = nth("Two-Hand", 1)
+		if thSc > (mhSc + ohSc) then
+			if bslot == "Main Hand" then return thId, thSc else return nil, 0, true end
+		else
+			if bslot == "Main Hand" then return mhId, mhSc else return ohId, ohSc end
+		end
 	end
-	return bId, bSc or 0
+	return nth(bslot, n)
 end
 
 function BisBuddyLO.Cell(col, idx)
@@ -3415,11 +3425,12 @@ end
 
 function BisBuddyLO.RenderCol(col, idxList, bagIds, bagByName)
 	if col.cells then for _, c in ipairs(col.cells) do c:Hide() end end
-	local sumEq, sumBis = 0, 0
+	local seen, sumEq, sumBis = {}, 0, 0
 	for pos, gi in ipairs(idxList) do
 		local gs = GEAR_SLOTS[gi]
 		local iv, label, bslot = gs[1], gs[2], gs[3]
-		local tid, tscore = BisBuddyLO.TargetFor(bslot)
+		seen[bslot] = (seen[bslot] or 0) + 1              -- Ring 2 / Trinket 2 -> 2nd-best target
+		local tid, tscore, used2H = BisBuddyLO.TargetFor(bslot, seen[bslot])
 		local eqLink = GetInventoryItemLink("player", iv)
 		local eqId = eqLink and ItemIdFromLink(eqLink)
 		local eqScore = eqLink and ScoreLink(eqLink) or nil
@@ -3428,7 +3439,7 @@ function BisBuddyLO.RenderCol(col, idxList, bagIds, bagByName)
 		local ownExact = (tid and bagIds[tid] and eqId ~= tid) or false   -- BiS itself sitting in bags
 		local alt = tname and bagByName[tname]                             -- a same-name (diff-difficulty) copy in bags
 		local ownAny = (alt and alt.id ~= tid and alt.id ~= eqId) or false
-		local status = BisBuddyLO.Classify(eqId, tid, ownExact, ownAny, eqRank, false)
+		local status = used2H and "none" or BisBuddyLO.Classify(eqId, tid, ownExact, ownAny, eqRank, false)
 		local cell = BisBuddyLO.Cell(col, pos)
 		cell.itemId = tid or eqId
 		local rc = BisBuddyLO.COL[status]
@@ -3441,21 +3452,23 @@ function BisBuddyLO.RenderCol(col, idxList, bagIds, bagByName)
 			cell.nmFS:SetText("|cffb0b0b0" .. label .. "|r")
 		end
 		local delta = math.floor((tscore - (eqScore or 0)) + 0.5)
+		local en = (eqId and D.items[eqId] and D.items[eqId][1]) or (eqLink and GetItemInfo(eqLink)) or "your item"
 		local line
-		if status == "none" then
-			line = eqLink and "|cff808080equipped \226\128\148 no BiS data|r" or ("|cff808080" .. label .. " \226\128\148 no BiS data|r")
+		if used2H then
+			line = "|cff808080covered by your 2-handed BiS|r"
+		elseif status == "none" then
+			line = eqLink and format("|cff808080Current %s (no BiS data)|r", Clip(en, 22)) or ("|cff808080" .. label .. " \226\128\148 no BiS data|r")
 		elseif status == "equipped" then
 			line = "|cff35c94a\226\156\147 equipped (BiS)|r"
 		elseif status == "bags" then
 			line = "|cffe0a422BiS is in your bags \226\128\148 equip it|r"
+		elseif eqLink then
+			local hex = (status == "close") and "e8722c" or "c8443c"
+			line = format("|cff%sCurrent %s. Upgrade +%d|r", hex, Clip(en, 22), delta)
 		elseif ownAny then
 			line = format("|cffe8722chave the %s in bags. Upgrade +%d|r", (alt.ver ~= "" and alt.ver) or "another", delta)
-		elseif not eqLink then
-			line = format("|cffc8443c%s empty. Upgrade +%d|r", label, delta)
 		else
-			local hex = (status == "close") and "e8722c" or "c8443c"
-			local en = (eqId and D.items[eqId] and D.items[eqId][1]) or "your item"
-			line = format("|cff%sEquipped %s. Upgrade +%d|r", hex, Clip(en, 22), delta)
+			line = format("|cffc8443c%s empty. Upgrade +%d|r", label, delta)
 		end
 		cell.stat:SetText(line)
 		cell:Show()
