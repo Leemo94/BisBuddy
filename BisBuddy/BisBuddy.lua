@@ -3904,24 +3904,31 @@ function BisBuddyLO.ShowSets()
 	local f = BisBuddyLO.panel
 	if not (f and f.setsPanel) then return end
 	BisBuddyLO.CenterMode("sets")
-	local present = {}   -- setName -> member slots with a usable piece (one pass)
+	local present, sscore = {}, {}   -- setName -> member slots present, + summed best-piece score (relevance)
 	for _, list in pairs(activeSlotRanks) do
 		local seen = {}
 		for _, e in ipairs(list) do
 			local it = D.items[e[1]]; local sn = it and it[10]
-			if sn and sn ~= "" and not seen[sn] then seen[sn] = true; present[sn] = (present[sn] or 0) + 1 end
+			if sn and sn ~= "" and not seen[sn] then
+				seen[sn] = true
+				present[sn] = (present[sn] or 0) + 1
+				sscore[sn] = (sscore[sn] or 0) + (e[2] or 0)
+			end
 		end
 	end
 	local rel = {}
 	for name, cnt in pairs(present) do
 		local set = D.sets and D.sets[name]
-		if set and set.bonuses and cnt >= 3 then rel[#rel + 1] = { name = name, cnt = cnt, set = set } end
+		if set and set.bonuses and cnt >= 3 then rel[#rel + 1] = { name = name, cnt = cnt, set = set, sc = sscore[name] or 0 } end
 	end
-	table.sort(rel, function(a, b) if a.cnt ~= b.cnt then return a.cnt > b.cnt end return a.name < b.name end)
+	table.sort(rel, function(a, b) if a.sc ~= b.sc then return a.sc > b.sc end return a.name < b.name end)   -- most relevant first
 	local cur = db.loSetTarget
+	local VIS, total = 10, #rel
+	local off = math.max(0, math.min(BisBuddyLO.setScroll or 0, math.max(0, total - VIS)))
+	BisBuddyLO.setScroll = off
 	if f.setRows then for _, r in ipairs(f.setRows) do r:Hide() end end
-	for i = 1, math.min(#rel, 7) do
-		local e = rel[i]
+	for i = 1, math.min(VIS, total - off) do
+		local e = rel[off + i]
 		local tiers = {}
 		for _, tk in ipairs({ 3, 6 }) do if e.set.bonuses[tostring(tk)] and e.cnt >= tk then tiers[#tiers + 1] = tk end end
 		local r = BisBuddyLO.SetRow(i)
@@ -3932,11 +3939,14 @@ function BisBuddyLO.ShowSets()
 		r.bn:SetText("|cff707078" .. Clip(e.set.bonuses[tostring(active or tiers[#tiers] or 3)] or "", 48) .. "|r")
 		r:Show()
 	end
-	if #rel == 0 then
+	if total == 0 then
 		f.setsSub:SetText("|cff808080no multi-piece sets available for this spec here|r")
+	elseif cur then
+		f.setsSub:SetText(format("|cffc8a24etargeting %s (%dpc)|r \194\183 click to change / clear", Clip(cur.name, 16), cur.pieces))
+	elseif total > VIS then
+		f.setsSub:SetText(format("|cff808080%d-%d of %d \194\183 scroll for more \194\183 click to target|r", off + 1, math.min(off + VIS, total), total))
 	else
-		f.setsSub:SetText(cur and format("|cffc8a24etargeting %s (%dpc)|r \194\183 click to change / clear",
-			Clip(cur.name, 18), cur.pieces) or "|cff808080click a set to force its bonus into the loadout|r")
+		f.setsSub:SetText("|cff808080click a set to force its bonus into the loadout|r")
 	end
 end
 
@@ -4084,6 +4094,8 @@ function BisBuddyLO.Create()
 	-- inline Set Bonuses editor
 	f.setsPanel = CreateFrame("Frame", nil, f)
 	f.setsPanel:SetPoint("TOP", 0, -58); f.setsPanel:SetWidth(288); f.setsPanel:SetHeight(400); f.setsPanel:Hide()
+	f.setsPanel:EnableMouseWheel(true)
+	f.setsPanel:SetScript("OnMouseWheel", function(self, delta) BisBuddyLO.setScroll = math.max(0, (BisBuddyLO.setScroll or 0) - delta); BisBuddyLO.ShowSets() end)
 	f.setsPanel:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
 	f.setsPanel:SetBackdropColor(0.07, 0.07, 0.094, 0.9); f.setsPanel:SetBackdropBorderColor(0.17, 0.17, 0.21, 1)
 	f.setsTitle = f.setsPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.setsTitle:SetPoint("TOPLEFT", 9, -7); f.setsTitle:SetText("|cffffd100Set Bonuses|r")
