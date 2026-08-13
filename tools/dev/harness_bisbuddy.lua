@@ -142,6 +142,7 @@ local function NewFrame(name)
 		function t:SetTexture(a, b, c, d) self.r, self.g, self.b, self.a = a, b, c, d end
 		function t:SetVertexColor() end
 		function t:SetAlpha() end
+		function t:SetTexCoord() end
 		return t
 	end
 	function fr:ClearAllPoints() end
@@ -1335,6 +1336,36 @@ check(te:find("BiS Trinket") ~= nil, "supplement item ranks as BiS for its slot"
 SlashCmdList["BISBUDDY"]("extra clear")
 local te2 = tipFor(800001)
 check(clean(te2):find("Extra:") == nil, "/bb extra clear un-ranks the supplement item")
+
+-- ---------- set data + class-locked pooling (loadout foundation) ----------
+check(BisBuddyData.sets and next(BisBuddyData.sets) ~= nil, "BisBuddyData.sets baked")
+do local n = 0; for _ in pairs(BisBuddyData.sets or {}) do n = n + 1 end
+	check(n >= 100, "many sets baked (" .. n .. ")") end
+local ef = BisBuddyData.sets and BisBuddyData.sets["The Earthfury"]
+check(ef and ef.bonuses and ef.bonuses["3"] and ef.bonuses["6"],
+	"The Earthfury (healer) set has 3-pc + 6-pc bonuses")
+check(ef and ef.bonuses and ef.bonuses["3"]:find("Mana") ~= nil,
+	"The Earthfury 3-pc bonus text baked (mana refund)")
+-- a formerly class-locked Shaman tier piece is now pooled + carries its setName (item field 10)
+local eh = BisBuddyData.items[10861]
+check(eh ~= nil, "formerly class-locked Earthfury Headguard (10861) now in the pool")
+check(eh and eh[10] and eh[10] ~= "",
+	"pooled item carries setName in field 10 (" .. tostring(eh and eh[10]) .. ")")
+
+-- ---------- loadout panel smoke (builds + renders without error) ----------
+SlashCmdList["BISBUDDY"]("spec Invention")
+do
+	local ok, err = pcall(function() SlashCmdList["BISBUDDY"]("loadout") end)
+	check(ok, "/bb loadout builds + renders without error" .. (ok and "" or (": " .. tostring(err))))
+	check(_G.BisBuddyLoadoutFrame ~= nil, "loadout frame created")
+	-- pure classifier sanity (BisBuddyLO is a global, reachable here)
+	check(BisBuddyLO.Classify(5, 5) == "equipped", "Classify: exact BiS equipped -> equipped")
+	check(BisBuddyLO.Classify(9, 5, true) == "bags", "Classify: own target elsewhere -> bags")
+	check(BisBuddyLO.Classify(9, 5, false, true) == "close", "Classify: own another version -> close")
+	check(BisBuddyLO.Classify(9, 5, false, false, 3) == "close", "Classify: equipped item top-5 -> close")
+	check(BisBuddyLO.Classify(9, 5, false, false, 40) == "upgrade", "Classify: far from BiS -> upgrade")
+	check(BisBuddyLO.Classify(9, 5, false, false, nil, true) == "setlock", "Classify: set-locked -> setlock")
+end
 
 print(allOK and "\nALL TESTS PASSED" or "\nSOME TESTS FAILED")
 os.exit(allOK and 0 or 1)

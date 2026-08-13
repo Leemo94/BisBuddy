@@ -3355,6 +3355,147 @@ ToggleGearPanel = function()
 end
 
 --------------------------------------------------------------------------------
+-- Loadout (/bb loadout): paper-doll home screen. Two slot columns + a center
+-- panel; each cell = the BiS target vs your equipped item, colour-coded by
+-- have/need status. Reuses the gear engine (GEAR_SLOTS / ScanBags /
+-- activeSlotRanks / rankIndex / ScoreLink). Additive + isolated (does not touch
+-- the tooltip / BiS-Lists / gear paths). Everything hangs off one local table
+-- so we add just 1 file-level local (near the 200-local chunk ceiling).
+--------------------------------------------------------------------------------
+BisBuddyLO = { panel = nil }   -- global (not local) to stay under the 200-local chunk ceiling
+BisBuddyLO.COL = {
+	equipped = { 0.21, 0.79, 0.29 }, bags = { 0.88, 0.64, 0.13 },
+	close = { 0.91, 0.45, 0.17 }, upgrade = { 0.78, 0.27, 0.24 },
+	setlock = { 0.55, 0.42, 0.15 },
+}
+BisBuddyLO.LEFT  = { 1, 2, 3, 4, 5, 6, 15, 16 }        -- GEAR_SLOTS idx: Head..Wrist, MainHand, OffHand
+BisBuddyLO.RIGHT = { 7, 8, 9, 10, 11, 12, 13, 14, 17 } -- Hands..Trinket2, Ranged
+
+-- pure have/need classifier (status key from the facts)
+function BisBuddyLO.Classify(eqId, targetId, ownExact, ownAny, eqRank, setLocked)
+	if setLocked then return "setlock" end
+	if not targetId then return eqId and "equipped" or "upgrade" end
+	if eqId == targetId then return "equipped" end
+	if ownExact then return "bags" end
+	if ownAny or (eqRank and eqRank <= 5) then return "close" end
+	return "upgrade"
+end
+
+function BisBuddyLO.Cell(col, idx)
+	col.cells = col.cells or {}
+	if col.cells[idx] then return col.cells[idx] end
+	local c = CreateFrame("Button", nil, col)
+	c:SetWidth(194); c:SetHeight(40)
+	c:SetPoint("TOPLEFT", 0, -(idx - 1) * 44)
+	c.bar = c:CreateTexture(nil, "ARTWORK"); c.bar:SetPoint("TOPLEFT", 0, 0); c.bar:SetPoint("BOTTOMLEFT", 0, 0); c.bar:SetWidth(3)
+	c.icon = c:CreateTexture(nil, "ARTWORK"); c.icon:SetPoint("LEFT", 8, 0); c.icon:SetWidth(30); c.icon:SetHeight(30); c.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+	c.nmFS = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); c.nmFS:SetPoint("TOPLEFT", 44, -3); c.nmFS:SetPoint("RIGHT", -2, 0); c.nmFS:SetJustifyH("LEFT")
+	c.stat = c:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall"); c.stat:SetPoint("TOPLEFT", 44, -19); c.stat:SetPoint("RIGHT", -2, 0); c.stat:SetJustifyH("LEFT")
+	local hl = c:CreateTexture(nil, "HIGHLIGHT"); hl:SetAllPoints(); hl:SetTexture(1, 1, 1, 0.06)
+	c:SetScript("OnEnter", function(self) if self.itemId then GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:SetHyperlink("item:" .. self.itemId); GameTooltip:Show() end end)
+	c:SetScript("OnLeave", function() GameTooltip:Hide() end)
+	col.cells[idx] = c
+	return c
+end
+
+function BisBuddyLO.RenderCol(col, idxList, owned, ownedNames)
+	if col.cells then for _, c in ipairs(col.cells) do c:Hide() end end
+	local sumEq, sumBis = 0, 0
+	for pos, gi in ipairs(idxList) do
+		local gs = GEAR_SLOTS[gi]
+		local iv, label, bslot = gs[1], gs[2], gs[3]
+		local list = activeSlotRanks[bslot]
+		local tid = list and list[1] and list[1][1]
+		local tscore = (list and list[1] and list[1][2]) or 0
+		local eqLink = GetInventoryItemLink("player", iv)
+		local eqId = eqLink and ItemIdFromLink(eqLink)
+		local eqScore = eqLink and ScoreLink(eqLink) or nil
+		local eqRank = eqId and rankIndex[eqId] and rankIndex[eqId].rank
+		local ownExact = (tid and owned[tid] and eqId ~= tid) or false
+		local tname = tid and D.items[tid] and D.items[tid][1]
+		local ownAny = (tname and ownedNames[tname] and not ownExact and eqId ~= tid) or false
+		local status = BisBuddyLO.Classify(eqId, tid, ownExact, ownAny, eqRank, false)
+		local cell = BisBuddyLO.Cell(col, pos)
+		cell.itemId = tid
+		local rc = BisBuddyLO.COL[status]
+		cell.bar:SetTexture(rc[1], rc[2], rc[3])
+		if tid then
+			cell.icon:SetTexture(select(10, GetItemInfo(tid)) or "Interface\\Icons\\INV_Misc_QuestionMark")
+			cell.nmFS:SetText("|cffa335ee" .. Clip(tname or ("item " .. tid), 22) .. "|r")
+		else
+			cell.icon:SetTexture("Interface\\PaperDoll\\UI-Backpack-EmptySlot")
+			cell.nmFS:SetText("|cff909090" .. label .. "|r")
+		end
+		local delta = math.floor((tscore - (eqScore or 0)) + 0.5)
+		local line
+		if status == "equipped" then
+			line = "|cff35c94a\226\156\147 equipped (BiS)|r"
+		elseif status == "bags" then
+			line = "|cffe0a422in your bags \226\128\148 equip it|r"
+		elseif status == "close" and ownAny then
+			line = "|cffe8722cown another version \226\128\148 upgrade the tier|r"
+		elseif not eqLink then
+			line = format("|cffc8443c(%s empty) Upgrade +%d|r", label, delta)
+		else
+			local hex = (status == "close") and "e8722c" or "c8443c"
+			local en = (eqId and D.items[eqId] and D.items[eqId][1]) or "your item"
+			line = format("|cff%sEquipped %s. Upgrade +%d|r", hex, Clip(en, 14), delta)
+		end
+		cell.stat:SetText(line)
+		cell:Show()
+		sumEq = sumEq + (eqScore or 0); sumBis = sumBis + tscore
+	end
+	return sumEq, sumBis
+end
+
+function BisBuddyLO.Render()
+	local f = BisBuddyLO.panel
+	if not f or not f:IsShown() then return end
+	if not specKey then
+		f.header:SetText("|cffff2020No spec set|r - open BisBuddy (/bb) and pick your spec.")
+		return
+	end
+	wipe(equippedScoreCache)
+	local best, owned = ScanBags()
+	local ownedNames = {}
+	for id in pairs(owned) do local it = D.items[id]; if it then ownedNames[it[1]] = true end end
+	local e1, b1 = BisBuddyLO.RenderCol(f.leftCol, BisBuddyLO.LEFT, owned, ownedNames)
+	local e2, b2 = BisBuddyLO.RenderCol(f.rightCol, BisBuddyLO.RIGHT, owned, ownedNames)
+	f.header:SetText(format("|cffffd100%s|r  \226\128\148  Current |cff35c94a%d|r  /  BiS |cffffd100%d|r",
+		(strmatch(specKey, "|(.+)$") or specKey), math.floor(e1 + e2 + 0.5), math.floor(b1 + b2 + 0.5)))
+end
+
+function BisBuddyLO.Create()
+	if BisBuddyLO.panel then return BisBuddyLO.panel end
+	local f = CreateFrame("Frame", "BisBuddyLoadoutFrame", UIParent)
+	f:SetWidth(560); f:SetHeight(460); f:SetPoint("CENTER"); f:SetFrameStrata("DIALOG")
+	StyleDialog(f)
+	f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
+	f:SetScript("OnDragStart", f.StartMoving)
+	f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing(); SavePanelPos(self) end)
+	tinsert(UISpecialFrames, "BisBuddyLoadoutFrame")
+	f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+	f.title:SetPoint("TOPLEFT", 16, -14); f.title:SetText("Loadout")
+	local close = CreateFrame("Button", nil, f, "UIPanelCloseButton"); close:SetPoint("TOPRIGHT", -6, -6)
+	f.header = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	f.header:SetPoint("TOPLEFT", 18, -40); f.header:SetJustifyH("LEFT")
+	f.leftCol = CreateFrame("Frame", nil, f); f.leftCol:SetPoint("TOPLEFT", 12, -62); f.leftCol:SetWidth(196); f.leftCol:SetHeight(380)
+	f.rightCol = CreateFrame("Frame", nil, f); f.rightCol:SetPoint("TOPRIGHT", -12, -62); f.rightCol:SetWidth(196); f.rightCol:SetHeight(380)
+	f.center = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	f.center:SetPoint("TOP", 0, -84); f.center:SetWidth(140); f.center:SetJustifyH("CENTER")
+	f.center:SetText("|cff808080Set Bonuses\n(coming)\n\nclick a slot for\nits item list|r")
+	f:Hide()
+	BisBuddyLO.panel = f
+	return f
+end
+
+function BisBuddyLO.Toggle()
+	RefreshSpec(true)
+	local f = BisBuddyLO.Create()
+	if f:IsShown() then f:Hide() else PlacePanel(f, true); f:Show(); BisBuddyLO.Render() end
+end
+
+--------------------------------------------------------------------------------
 -- Reserve Planner (/bb sr): pick a raid + difficulty and see that raid's drops
 -- ranked by YOUR biggest upgrade, so PUG players know what to soft-reserve.
 -- Reads the per-spec cells for the chosen tier, filtered by the source's raid.
@@ -3667,6 +3808,8 @@ SlashCmdList["BISBUDDY"] = function(msg)
 		ToggleEnchantsPanel()
 	elseif cmd == "gear" or cmd == "bags" then
 		ToggleGearPanel()
+	elseif cmd == "loadout" or cmd == "lo" then
+		BisBuddyLO.Toggle()
 	elseif cmd == "sr" or cmd == "reserve" or cmd == "reserves" then
 		ToggleSRPanel()
 	elseif cmd == "loot" then

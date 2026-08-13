@@ -366,14 +366,16 @@ def build(weights, items, topn, prof=None, max_phase_cap=None):
     any item in the cumulative top-N is in the top-N of its own (phase,tier)
     cell. PvP/Bloodforged are cat-tagged in the pool and filtered by the addon.
     """
-    # class-locked leftovers from the original game can't be worn by CoA classes
+    # CoA ignores the original game's class restrictions (classless server) - so we KEEP
+    # class-locked items (tier sets like Earthfury, etc.). Equippability is enforced by
+    # armour/weapon PROFICIENCY (can_use / the addon's CanUseByType via each item's type),
+    # not by the vanilla class tag. skipped_class now counts how many we kept for the log.
     usable = []
     skipped_class = 0
     for it in items:
         cls = it.get("classes")
         if cls and cls != ["All"]:
-            skipped_class += 1
-            continue
+            skipped_class += 1  # formerly class-locked - kept, proficiency will filter
         if it.get("slot") in SKIP_SLOTS or not it.get("id"):
             continue
         usable.append(it)
@@ -411,7 +413,7 @@ def build(weights, items, topn, prof=None, max_phase_cap=None):
                     pool[iid] = (it.get("name") or "?", it.get("version") or "", src,
                                  iphase, difficulty_tier(it), item_category(it),
                                  coded_stats(it), it.get("sourceCategory") or "",
-                                 it.get("type") or "")
+                                 it.get("type") or "", it.get("setName") or "")
         cells[spec] = spec_cells
 
     # FULL POOL: every usable, rankable item (>=1 weightable stat), so the addon can
@@ -435,12 +437,25 @@ def build(weights, items, topn, prof=None, max_phase_cap=None):
             src = (it.get("source") or "?")[:60]
             pool[iid] = (it.get("name") or "?", it.get("version") or "", src,
                          iphase, tier, item_category(it), cs,
-                         it.get("sourceCategory") or "", it.get("type") or "")
-    return cells, pool, phases, skipped_class, full_slot_pool
+                         it.get("sourceCategory") or "", it.get("type") or "", it.get("setName") or "")
+    # set data: setName -> {bonuses (piece-count -> effect), member slots, phase}. Same-named
+    # sets stay distinct by setName (Earthfury Regalia / Harness / The Earthfury healer).
+    sets = {}
+    for it in usable:
+        sn, sb = it.get("setName"), it.get("setBonuses")
+        if not sn or not sb:
+            continue
+        e = sets.setdefault(sn, {"bonuses": {}, "members": {}, "phase": it.get("phase") or 1})
+        for k, v in sb.items():
+            if v:
+                e["bonuses"][str(k)] = v
+        if it.get("slot"):
+            e["members"][it["slot"]] = 1
+    return cells, pool, phases, skipped_class, full_slot_pool, sets
 
 
 def emit_lua(out_path, manifest, weights, cells, pool, phases, total_items, prof=None, specroles_ver="?",
-             enchants=None, full_slot_pool=None):
+             enchants=None, full_slot_pool=None, sets=None):
     specAlias = {k.split("|")[1]: k for k in weights}
     lines = []
     push = lines.append
@@ -464,6 +479,7 @@ def emit_lua(out_path, manifest, weights, cells, pool, phases, total_items, prof
     push("  items = {},")
     push("  prof = { classes = {}, rangedOverride = {} },")
     push("  enchants = {},")
+    push("  sets = {},")
     push("}")
     # weapon/armor proficiency, so the addon can also skip unusable hovered items
     if prof and prof.get("weap"):
@@ -516,10 +532,10 @@ def emit_lua(out_path, manifest, weights, cells, pool, phases, total_items, prof
     for start in range(0, len(ids), BATCH):
         push("do local t = (function() return {")
         for iid in ids[start:start + BATCH]:
-            n, v, src, ph, tier, cat, stats, scat, typ = pool[iid]
+            n, v, src, ph, tier, cat, stats, scat, typ, setn = pool[iid]
             statstr = "{" + ",".join("%s=%g" % (c, val) for c, val in sorted(stats.items())) + "}"
-            push("  [%d] = {%s,%s,%s,%d,%d,%d,%s,%s,%s}," % (
-                iid, lua_str(n), lua_str(v), lua_str(src), ph, tier, cat, statstr, lua_str(scat), lua_str(typ)))
+            push("  [%d] = {%s,%s,%s,%d,%d,%d,%s,%s,%s,%s}," % (
+                iid, lua_str(n), lua_str(v), lua_str(src), ph, tier, cat, statstr, lua_str(scat), lua_str(typ), lua_str(setn)))
         push("} end)() for k, v in pairs(t) do BisBuddyData.items[k] = v end end")
     # per-slot candidate pool (spec-agnostic): every pooled item grouped by slot, so
     # the addon can rank the WIDE usable pool when the user sets custom weights
@@ -542,6 +558,18 @@ def emit_lua(out_path, manifest, weights, cells, pool, phases, total_items, prof
     for slot in sorted(slot_pool):
         push("BisBuddyData.slotPool[%s] = {%s}" % (
             lua_str(slot), ",".join(str(i) for i in sorted(slot_pool[slot]))))
+    # sets: { setName = { bonuses = {["3"]=text,...}, members = {slot=1,...}, phase = N } }
+    # for the loadout set-bonus selector + min-loss optimizer. Same-named sets stay distinct
+    # by setName. Item set membership is on each item's 10th field (items[id][10] = setName).
+    if sets:
+        push("do local S = (function() return {")
+        for sn in sorted(sets):
+            e = sets[sn]
+            bon = ",".join("[%s]=%s" % (lua_str(k), lua_str(v)) for k, v in sorted(e["bonuses"].items()))
+            mem = ",".join("[%s]=1" % lua_str(s) for s in sorted(e["members"]))
+            push("  [%s] = { bonuses = {%s}, members = {%s}, phase = %d }," % (
+                lua_str(sn), bon, mem, e.get("phase", 1)))
+        push("} end)() for k, v in pairs(S) do BisBuddyData.sets[k] = v end end")
     # enchants: { {name, slot, {statcode=val,...}}, ... } - scored at runtime by
     # the active spec's weights (same stat codes as items[id][7]).
     if enchants:
@@ -614,7 +642,7 @@ def main():
     if not prof or not prof.get("weap"):
         print("WARNING: no weapon/armor proficiency parsed - rankings will NOT be equip-filtered")
 
-    cells, pool, phases, skipped_class, full_slot_pool = build(weights, items, args.top, prof, args.phase)
+    cells, pool, phases, skipped_class, full_slot_pool, sets = build(weights, items, args.top, prof, args.phase)
 
     # enchants (sourceCategory == "enchants"): keep those with weightable stats,
     # de-dup by (slot, name) preferring the richest-stat version.
@@ -638,11 +666,11 @@ def main():
           f"{sum(1 for it in items if it.get('sourceCategory') == 'enchants')} total)")
 
     n_ids = emit_lua(os.path.abspath(args.out), manifest, weights, cells, pool, phases, len(items), prof,
-                     specroles_ver, enchants, full_slot_pool=full_slot_pool)
+                     specroles_ver, enchants, full_slot_pool=full_slot_pool, sets=sets)
     size = os.path.getsize(os.path.abspath(args.out))
     print(f"wrote {args.out}: {len(cells)} specs x {len(phases)} phases x {len(DIFF_LABELS)} tiers, "
           f"{n_ids} unique ranked items, {size//1024} KB "
-          f"(skipped {skipped_class} old-class-locked items)")
+          f"(kept {skipped_class} formerly class-locked items - CoA classless)")
 
     # sanity: merge cells like the addon would, PvE-only, and show #1 Two-Hand
     # per phase at each difficulty cap
