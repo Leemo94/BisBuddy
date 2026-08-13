@@ -3469,6 +3469,11 @@ function BisBuddyLO.RenderCol(col, idxList, bagIds, bagByName)
 		local gs = GEAR_SLOTS[gi]
 		local iv, label, bslot = gs[1], gs[2], gs[3]
 		local tid, tscore, used2H = BisBuddyLO.TargetFor(bslot, usedName[bslot])   -- Ring 2 / Trinket 2 skip slot-1's item
+		local manual = db and db.loTargets and db.loTargets[iv]
+		if manual and D.items[manual] then                                        -- user pinned a goal for this slot
+			tid, used2H = manual, nil
+			tscore = (rankIndex[manual] and rankIndex[manual].score) or tscore
+		end
 		local eqLink = GetInventoryItemLink("player", iv)
 		local eqId = eqLink and ItemIdFromLink(eqLink)
 		local eqScore = eqLink and ScoreLink(eqLink) or nil
@@ -3486,7 +3491,8 @@ function BisBuddyLO.RenderCol(col, idxList, bagIds, bagByName)
 		cell.bar:SetTexture(rc[1], rc[2], rc[3])
 		if tid then
 			cell.icon:SetTexture(select(10, GetItemInfo(tid)) or "Interface\\Icons\\INV_Misc_QuestionMark")
-			cell.nmFS:SetText("|cffa335ee" .. Clip(tname or ("item " .. tid), 40) .. "|r")
+			local goal = (manual and tid == manual) and "|cffffd100\226\152\133|r " or ""   -- your pinned goal
+			cell.nmFS:SetText(goal .. "|cffa335ee" .. Clip(tname or ("item " .. tid), 38) .. "|r")
 		else
 			cell.icon:SetTexture((eqLink and select(10, GetItemInfo(eqLink))) or "Interface\\PaperDoll\\UI-Backpack-EmptySlot")
 			cell.nmFS:SetText("|cffb0b0b0" .. label .. "|r")
@@ -3531,6 +3537,19 @@ function BisBuddyLO.ListRow(i)
 	r.text = r:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); r.text:SetPoint("LEFT", 2, 0); r.text:SetJustifyH("LEFT")
 	r:SetScript("OnEnter", function(self) if self.itemId then GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:SetHyperlink("item:" .. self.itemId); GameTooltip:Show() end end)
 	r:SetScript("OnLeave", function() GameTooltip:Hide() end)
+	r:SetScript("OnClick", function(self)
+		if not self.itemId then return end
+		if IsShiftKeyDown() then
+			local link = select(2, GetItemInfo(self.itemId))
+			if link and ChatEdit_InsertLink then ChatEdit_InsertLink(link) end
+			return
+		end
+		local iv = BisBuddyLO.selIv
+		if not (iv and db) then return end
+		db.loTargets = db.loTargets or {}
+		db.loTargets[iv] = (db.loTargets[iv] == self.itemId) and nil or self.itemId   -- toggle this slot's goal
+		BisBuddyLO.Render()                                                            -- repaints cells + re-shows the list
+	end)
 	f.listRows[i] = r
 	return r
 end
@@ -3571,16 +3590,19 @@ function BisBuddyLO.ShowList(bslot, iv)
 			end
 		end
 	end
+	local tgt = db and db.loTargets and db.loTargets[iv]
 	if f.listRows then for _, r in ipairs(f.listRows) do r:Hide() end end
 	for i = 1, #order do
 		local g = order[i]
 		local r = BisBuddyLO.ListRow(i)
 		r.itemId = g.id
 		local up = (base and g.score > base) and "|cff20ff20^|r " or "   "
+		local mark = (tgt == g.id) and "|cffffd100\226\152\133|r " or format("|cff999999%2d|r ", i)
 		local ver = (g.info and g.info[2] and g.info[2] ~= "") and (" |cff888888" .. g.info[2] .. "|r") or ""
-		r.text:SetText(format("%s|cff999999%2d|r %s%s|r%s  |cff69ccf0%.0f|r", up, i, ItemHex(g.id), Clip(g.name, 20), ver, g.score))
+		r.text:SetText(format("%s%s%s%s|r%s  |cff69ccf0%.0f|r", up, mark, ItemHex(g.id), Clip(g.name, 20), ver, g.score))
 		r:Show()
 	end
+	if f.listHint then f.listHint:SetText("|cff707070click a row = set goal (\226\152\133)  \194\183  shift-click = link|r") end
 	if #order == 0 then f.listTitle:SetText((f.listTitle:GetText() or "") .. "  |cff808080(no items)|r") end
 end
 
@@ -3633,6 +3655,8 @@ function BisBuddyLO.Create()
 	f.list = CreateFrame("Frame", nil, f); f.list:SetPoint("TOP", 0, -58); f.list:SetWidth(288); f.list:SetHeight(400); f.list:Hide()
 	f.listTitle = f.list:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 	f.listTitle:SetPoint("TOPLEFT", 4, -2); f.listTitle:SetPoint("RIGHT", -4, 0); f.listTitle:SetJustifyH("LEFT")
+	f.listHint = f.list:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	f.listHint:SetPoint("BOTTOMLEFT", 4, 8); f.listHint:SetJustifyH("LEFT")
 	f:Hide()
 	BisBuddyLO.panel = f
 	return f
@@ -4214,6 +4238,7 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
 		db.threshold = db.threshold or 10
 		db.minUpgradePct = db.minUpgradePct or 1
 		db.phase = db.phase or 1 -- default: Pre-Raid + Zul'Gurub (raise as you progress)
+		db.loTargets = db.loTargets or {}  -- loadout: pinned goal item per inv slot (iv -> itemId)
 		-- difficulty is split into two independent caps (raid gear vs dungeon/M+ gear);
 		-- migrate the old single db.maxDiff, then retire it.
 		db.raidDiff = db.raidDiff or (db.maxDiff and math.min(db.maxDiff, 4)) or 4  -- raid gear cap (Ascended default)
