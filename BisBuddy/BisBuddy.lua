@@ -2256,7 +2256,7 @@ local function CreateMainPanel()
 	end
 	local f = CreateFrame("Frame", "BisBuddyFrame", UIParent)
 	f:SetWidth(360)
-	f:SetHeight(372)
+	f:SetHeight(230)
 	f:SetPoint("CENTER")
 	f:SetFrameStrata("DIALOG")
 	StyleDialog(f)
@@ -2273,7 +2273,7 @@ local function CreateMainPanel()
 	f.hint = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	f.hint:SetPoint("TOP", 0, -34)
 	f.hint:SetWidth(324)
-	f.hint:SetText("Set your spec, phase and difficulty. Then hover any item for its BiS rank + upgrade %.")
+	f.hint:SetText("Set your spec here. Phase, difficulty, weights, sources, sets and the rest live on the /bb Loadout screen.")
 	-- out-of-date banner: replaces the hint (same spot) when a newer peer version is seen
 	f.oodWarn = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 	f.oodWarn:SetPoint("TOP", 0, -30)
@@ -2315,34 +2315,8 @@ local function CreateMainPanel()
 		end
 	end)
 
-	-- Phase dropdown
-	rowLabel("Phase", -104)
-	f.phaseDD = MakeDropdown(f, "BisBuddyPhaseDropDown", 210)
-	f.phaseDD:SetPoint("TOPLEFT", 80, -98)
-	f.phaseDD:SetBuilder(function(add)
-		for p = 1, (D.maxPhase or 5) do
-			local n = p
-			add(n .. " - " .. PhaseLabel(n), function() SetPhase(n); RefreshMainPanel() end, db.phase == n)
-		end
-	end)
-
-	-- Difficulty: two independent caps - raid gear (Normal..Ascended) + dungeon/M+ gear.
-	rowLabel("Difficulty", -142)
-	f.raidDD = MakeDropdown(f, "BisBuddyRaidDiffDropDown", 122)
-	f.raidDD:SetPoint("TOPLEFT", 80, -136)
-	f.raidDD:SetBuilder(function(add)
-		for d = 1, 4 do
-			local n = d
-			add(DiffLabel(n), function() SetDiff("raid", n); RefreshMainPanel() end, db.raidDiff == n)
-		end
-	end)
-	f.mplusDD = MakeDropdown(f, "BisBuddyMplusDiffDropDown", 122)
-	f.mplusDD:SetPoint("TOPLEFT", 208, -136)
-	f.mplusDD:SetBuilder(function(add)
-		for _, n in ipairs({ 1, 2, 3, 5 }) do   -- dungeon tiers: Normal/Heroic/Mythic + M+10 (no Ascended)
-			add(DiffLabel(n), function() SetDiff("mplus", n); RefreshMainPanel() end, db.mplusDiff == n)
-		end
-	end)
+	-- Phase, difficulty, sources, weights, sets, enchants, reserve + talents all live on the
+	-- /bb Loadout screen now - removed from here so there's a single home for each setting.
 
 	local function makeCheck(name, text, x, y, onClick)
 		local cb = CreateFrame("CheckButton", name, f, "UICheckButtonTemplate")
@@ -2355,13 +2329,7 @@ local function CreateMainPanel()
 		cb:SetScript("OnClick", function(self) onClick(self:GetChecked() and true or false) end)
 		return cb
 	end
-	local srcBtn = CreateFrame("Button", "BisBuddySourcesBtn", f, "UIPanelButtonTemplate")
-	srcBtn:SetWidth(150)
-	srcBtn:SetHeight(22)
-	srcBtn:SetPoint("TOPLEFT", 20, -178)
-	srcBtn:SetText("Sources filter...")
-	srcBtn:SetScript("OnClick", function() ToggleSourcesPanel() end)
-	f.alertCB = makeCheck("BisBuddyAlertCheck", "Drop alerts, top-", 20, -204,
+	f.alertCB = makeCheck("BisBuddyAlertCheck", "Drop alerts, top-", 20, -100,
 		function(checked) db.alerts = checked end)
 	f.threshEB = CreateFrame("EditBox", "BisBuddyThreshEdit", f, "InputBoxTemplate")
 	f.threshEB:SetWidth(28)
@@ -2375,7 +2343,7 @@ local function CreateMainPanel()
 		RefreshMainPanel()
 	end)
 	f.threshEB:SetScript("OnEscapePressed", function(self) self:ClearFocus(); RefreshMainPanel() end)
-	f.tooltipCB = makeCheck("BisBuddyTooltipCheck", "Tooltip hints", 20, -228,
+	f.tooltipCB = makeCheck("BisBuddyTooltipCheck", "Tooltip hints", 20, -128,
 		function(checked) db.tooltip = checked end)
 
 	local function makeButton(text, x, y, w, onClick)
@@ -2387,16 +2355,9 @@ local function CreateMainPanel()
 		b:SetScript("OnClick", onClick)
 		return b
 	end
-	-- row 1: the viewer panels
-	makeButton("Gear", 20, -262, 74, function() ToggleGearPanel() end)
-	makeButton("BiS Lists", 102, -262, 74, function() ToggleBrowsePanel() end)
-	makeButton("Enchants", 184, -262, 74, function() ToggleEnchantsPanel() end)
-	makeButton("Talents", 266, -262, 74, function() ToggleTalentsPanel() end)
-	-- row 2: weight tools
-	makeButton("Reserve", 20, -290, 74, function() ToggleSRPanel() end)
-	makeButton("Weights", 102, -290, 74, function() ToggleWeightsPanel() end)
-	makeButton("Import", 184, -290, 74, function() StaticPopup_Show("BISBUDDY_IMPORT") end)
-	makeButton("Export", 266, -290, 74, function() if ExportWeights() then StaticPopup_Show("BISBUDDY_EXPORT") end end)
+	-- weight import/export (all the viewer panels + tools are reachable from the Loadout control bar now)
+	makeButton("Import weights", 20, -164, 158, function() StaticPopup_Show("BISBUDDY_IMPORT") end)
+	makeButton("Export weights", 182, -164, 158, function() if ExportWeights() then StaticPopup_Show("BISBUDDY_EXPORT") end end)
 
 	f.status = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 	f.status:SetPoint("BOTTOM", 0, 16)
@@ -2414,9 +2375,6 @@ RefreshMainPanel = function()
 	local f = mainPanel
 	if warnedOutOfDate then f.oodWarn:Show(); f.hint:Hide() else f.oodWarn:Hide(); f.hint:Show() end
 	f.specDD:SetText(specKey or "not set - pick your spec")
-	f.phaseDD:SetText(db.phase .. " - " .. PhaseLabel(db.phase))
-	f.raidDD:SetText("Raid: " .. DiffLabel(db.raidDiff))
-	f.mplusDD:SetText("M+: " .. DiffLabel(db.mplusDiff))
 	f.alertCB:SetChecked(db.alerts)
 	f.tooltipCB:SetChecked(db.tooltip)
 	if not f.threshEB:HasFocus() then f.threshEB:SetText(tostring(db.threshold)) end
