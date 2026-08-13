@@ -3534,9 +3534,14 @@ function BisBuddyLO.RenderCol(col, idxList, bagIds, bagByName)
 		local iv, label, bslot = gs[1], gs[2], gs[3]
 		local tid, tscore, wflag = BisBuddyLO.TargetFor(bslot, usedName[bslot])   -- wflag: "2h" main / "covered" off-hand
 		local manual = db and db.loTargets and db.loTargets[iv]
-		if manual and D.items[manual] then                                        -- user pinned a goal for this slot
+		local setId = BisBuddyLO.setLock and BisBuddyLO.setLock[bslot]
+		local isSet = false
+		if manual and D.items[manual] then                                        -- user pinned a goal for this slot (wins)
 			tid, wflag = manual, nil
 			tscore = (rankIndex[manual] and rankIndex[manual].score) or tscore
+		elseif setId and D.items[setId] then                                      -- forced by a targeted set bonus
+			tid, wflag, isSet = setId, nil, true
+			tscore = (rankIndex[setId] and rankIndex[setId].score) or tscore
 		end
 		local eqLink = GetInventoryItemLink("player", iv)
 		local eqId = eqLink and ItemIdFromLink(eqLink)
@@ -3547,7 +3552,7 @@ function BisBuddyLO.RenderCol(col, idxList, bagIds, bagByName)
 		local ownExact = (tid and bagIds[tid] and eqId ~= tid) or false   -- BiS itself sitting in bags
 		local alt = tname and bagByName[tname]                             -- a same-name (diff-difficulty) copy in bags
 		local ownAny = (alt and alt.id ~= tid and alt.id ~= eqId) or false
-		local status = (wflag == "covered") and "none" or BisBuddyLO.Classify(eqId, tid, ownExact, ownAny, eqRank, false)
+		local status = (wflag == "covered") and "none" or BisBuddyLO.Classify(eqId, tid, ownExact, ownAny, eqRank, isSet)
 		local cell = BisBuddyLO.Cell(col, pos)
 		cell.itemId = tid or eqId
 		cell.bslot, cell.iv = bslot, iv
@@ -3574,6 +3579,9 @@ function BisBuddyLO.RenderCol(col, idxList, bagIds, bagByName)
 		local line
 		if wflag == "covered" then
 			line = "|cff808080covered by your 2-handed BiS|r"
+		elseif status == "setlock" then
+			line = (eqId == tid) and "|cffc8a24e\226\156\147 set piece equipped|r"
+				or format("|cffc8a24efor the %s bonus|r", Clip((db and db.loSetTarget and db.loSetTarget.name) or "set", 18))
 		elseif status == "none" then
 			line = eqLink and ("|cff808080Current " .. Clip(en, 20) .. (tier and (" (" .. tier .. ")") or "") .. " (no BiS data)|r") or ("|cff808080" .. label .. " \226\128\148 no BiS data|r")
 		elseif status == "equipped" then
@@ -3740,6 +3748,7 @@ function BisBuddyLO.CenterMode(mode)
 	sw(f.list, mode == "list")
 	sw(f.weightsPanel, mode == "weights")
 	sw(f.sourcesPanel, mode == "sources")
+	sw(f.setsPanel, mode == "sets")
 end
 
 function BisBuddyLO.WRow(i)
@@ -3818,6 +3827,112 @@ function BisBuddyLO.ShowSources()
 	end
 end
 
+-- Set bonuses: with a target set + piece count, force the cheapest N member pieces into the
+-- loadout (least score loss vs each slot's BiS). Returns { bslot -> forced item id }.
+function BisBuddyLO.ComputeSetLock()
+	local t = db and db.loSetTarget
+	if not (t and t.name and t.pieces) then return nil end
+	local set = D.sets and D.sets[t.name]
+	if not (set and set.members) then return nil end
+	local cand = {}
+	for bslot in pairs(set.members) do
+		local list = activeSlotRanks[bslot]
+		if list and list[1] then
+			local slotBiS = list[1][2]
+			for _, e in ipairs(list) do
+				local it = D.items[e[1]]
+				if it and it[10] == t.name then
+					cand[#cand + 1] = { bslot = bslot, id = e[1], loss = slotBiS - e[2] }
+					break
+				end
+			end
+		end
+	end
+	table.sort(cand, function(a, b) return a.loss < b.loss end)
+	local lock = {}
+	for i = 1, math.min(t.pieces, #cand) do lock[cand[i].bslot] = cand[i].id end
+	return lock
+end
+
+function BisBuddyLO.CycleSet(name, tiers)
+	if not (tiers and #tiers > 0) then return end
+	local cur = db.loSetTarget
+	local nextTier
+	if not cur or cur.name ~= name then
+		nextTier = tiers[1]
+	else
+		for i, tv in ipairs(tiers) do if tv == cur.pieces then nextTier = tiers[i + 1]; break end end
+	end
+	db.loSetTarget = nextTier and { name = name, pieces = nextTier } or nil
+	BisBuddyLO.Render()
+	BisBuddyLO.ShowSets()
+end
+
+function BisBuddyLO.SetRow(i)
+	local f = BisBuddyLO.panel
+	f.setRows = f.setRows or {}
+	if f.setRows[i] then return f.setRows[i] end
+	local sp = f.setsPanel
+	local r = CreateFrame("Button", nil, sp)
+	r:SetHeight(30); r:SetPoint("TOPLEFT", 6, -42 - (i - 1) * 33); r:SetPoint("RIGHT", sp, "RIGHT", -6, 0)
+	local hl = r:CreateTexture(nil, "HIGHLIGHT"); hl:SetAllPoints(); hl:SetTexture(1, 1, 1, 0.08)
+	r.nm = r:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); r.nm:SetPoint("TOPLEFT", 4, -2); r.nm:SetPoint("RIGHT", -4, 0); r.nm:SetJustifyH("LEFT")
+	r.bn = r:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall"); r.bn:SetPoint("TOPLEFT", 4, -15); r.bn:SetPoint("RIGHT", -4, 0); r.bn:SetJustifyH("LEFT")
+	r:SetScript("OnClick", function(self) BisBuddyLO.CycleSet(self.setName, self.tiers) end)
+	r:SetScript("OnEnter", function(self)
+		local set = D.sets and D.sets[self.setName]
+		if not set then return end
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip:AddLine(self.setName, 1, 0.82, 0.31)
+		for _, tk in ipairs({ 3, 6 }) do local b = set.bonuses and set.bonuses[tostring(tk)]; if b then GameTooltip:AddLine("(" .. tk .. ") " .. b, 0.82, 0.82, 0.82, true) end end
+		GameTooltip:AddLine("click to force this bonus into your loadout", 0.5, 0.5, 0.55)
+		GameTooltip:Show()
+	end)
+	r:SetScript("OnLeave", function() GameTooltip:Hide() end)
+	f.setRows[i] = r
+	return r
+end
+
+function BisBuddyLO.ShowSets()
+	local f = BisBuddyLO.panel
+	if not (f and f.setsPanel) then return end
+	BisBuddyLO.CenterMode("sets")
+	local present = {}   -- setName -> member slots with a usable piece (one pass)
+	for _, list in pairs(activeSlotRanks) do
+		local seen = {}
+		for _, e in ipairs(list) do
+			local it = D.items[e[1]]; local sn = it and it[10]
+			if sn and sn ~= "" and not seen[sn] then seen[sn] = true; present[sn] = (present[sn] or 0) + 1 end
+		end
+	end
+	local rel = {}
+	for name, cnt in pairs(present) do
+		local set = D.sets and D.sets[name]
+		if set and set.bonuses and cnt >= 3 then rel[#rel + 1] = { name = name, cnt = cnt, set = set } end
+	end
+	table.sort(rel, function(a, b) if a.cnt ~= b.cnt then return a.cnt > b.cnt end return a.name < b.name end)
+	local cur = db.loSetTarget
+	if f.setRows then for _, r in ipairs(f.setRows) do r:Hide() end end
+	for i = 1, math.min(#rel, 7) do
+		local e = rel[i]
+		local tiers = {}
+		for _, tk in ipairs({ 3, 6 }) do if e.set.bonuses[tostring(tk)] and e.cnt >= tk then tiers[#tiers + 1] = tk end end
+		local r = BisBuddyLO.SetRow(i)
+		r.setName, r.tiers = e.name, tiers
+		local active = (cur and cur.name == e.name) and cur.pieces or nil
+		local tierStr = active and format("|cffc8a24e%dpc ON|r", active) or format("|cff70707aup to %dpc|r", tiers[#tiers] or e.cnt)
+		r.nm:SetText(format("%s%s|r |cff70707a(%d)|r  %s", active and "|cffffd100" or "|cffd0cede", Clip(e.name, 20), e.cnt, tierStr))
+		r.bn:SetText("|cff707078" .. Clip(e.set.bonuses[tostring(active or tiers[#tiers] or 3)] or "", 48) .. "|r")
+		r:Show()
+	end
+	if #rel == 0 then
+		f.setsSub:SetText("|cff808080no multi-piece sets available for this spec here|r")
+	else
+		f.setsSub:SetText(cur and format("|cffc8a24etargeting %s (%dpc)|r \194\183 click to change / clear",
+			Clip(cur.name, 18), cur.pieces) or "|cff808080click a set to force its bonus into the loadout|r")
+	end
+end
+
 function BisBuddyLO.Render()
 	local f = BisBuddyLO.panel
 	if not f or not f:IsShown() then return end
@@ -3825,6 +3940,7 @@ function BisBuddyLO.Render()
 		f.header:SetText("|cffff2020No spec set|r - click |cffffd100Settings|r below to pick your spec.")
 		return
 	end
+	BisBuddyLO.setLock = BisBuddyLO.ComputeSetLock()   -- forced set pieces (if a set bonus is targeted)
 	wipe(equippedScoreCache)
 	BisBuddyLO._uncached = false
 	local bagIds, bagByName = {}, {}
@@ -3902,7 +4018,7 @@ function BisBuddyLO.Create()
 	f.rightCol = CreateFrame("Frame", nil, f); f.rightCol:SetPoint("TOPRIGHT", -14, -64); f.rightCol:SetWidth(300); f.rightCol:SetHeight(390)
 	f.center = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 	f.center:SetPoint("TOP", 0, -150); f.center:SetWidth(260); f.center:SetJustifyH("CENTER")
-	f.center:SetText("|cff808080Set Bonuses\n(coming)\n\nclick any slot\nfor its item list|r")
+	f.center:SetText("|cff808080click any slot\nfor its item list\n\nWeights \194\183 Sources \194\183 Sets\nfrom the bar below|r")
 	f.list = CreateFrame("Frame", nil, f); f.list:SetPoint("TOP", 0, -58); f.list:SetWidth(288); f.list:SetHeight(400); f.list:Hide()
 	f.list:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
 	f.list:SetBackdropColor(0.07, 0.07, 0.094, 0.9)
@@ -3938,12 +4054,23 @@ function BisBuddyLO.Create()
 	f.spAll = CreateFrame("Button", nil, f.sourcesPanel, "UIPanelButtonTemplate"); f.spAll:SetWidth(120); f.spAll:SetHeight(20); f.spAll:SetPoint("BOTTOM", 0, 8); f.spAll:SetText("Enable all")
 	f.spAll:SetScript("OnClick", function() db.sources = db.sources or {}; for _, s in ipairs(SOURCE_BUCKETS) do db.sources[s[1]] = true end; BuildRankIndex(); wipe(equippedScoreCache); BisBuddyLO.ShowSources() end)
 
+	-- inline Set Bonuses editor
+	f.setsPanel = CreateFrame("Frame", nil, f)
+	f.setsPanel:SetPoint("TOP", 0, -58); f.setsPanel:SetWidth(288); f.setsPanel:SetHeight(400); f.setsPanel:Hide()
+	f.setsPanel:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+	f.setsPanel:SetBackdropColor(0.07, 0.07, 0.094, 0.9); f.setsPanel:SetBackdropBorderColor(0.17, 0.17, 0.21, 1)
+	f.setsTitle = f.setsPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.setsTitle:SetPoint("TOPLEFT", 9, -7); f.setsTitle:SetText("|cffffd100Set Bonuses|r")
+	f.setsSub = f.setsPanel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall"); f.setsSub:SetPoint("TOPLEFT", 9, -23); f.setsSub:SetPoint("RIGHT", -8, 0); f.setsSub:SetJustifyH("LEFT")
+	local setsClose = CreateFrame("Button", nil, f.setsPanel, "UIPanelCloseButton"); setsClose:SetWidth(26); setsClose:SetHeight(26); setsClose:SetPoint("TOPRIGHT", 3, 4)
+	setsClose:SetScript("OnClick", function() BisBuddyLO.CenterMode("home") end)
+
 	-- control bar: the loadout is the home screen, so the other panels are reachable from here.
-	-- Weights + Sources render inline in the center; Settings / Reserve / Talents open their windows.
+	-- Weights / Sources / Sets render inline in the center; Settings / Reserve / Talents open their windows.
 	local BAR = {
 		{ "Settings", function() SlashCmdList["BISBUDDY"]("setup") end },
 		{ "Weights",  function() BisBuddyLO.ShowWeights() end },
 		{ "Sources",  function() BisBuddyLO.ShowSources() end },
+		{ "Sets",     function() BisBuddyLO.ShowSets() end },
 		{ "Reserve",  function() SlashCmdList["BISBUDDY"]("sr") end },
 		{ "Talents",  function() SlashCmdList["BISBUDDY"]("talents") end },
 	}
