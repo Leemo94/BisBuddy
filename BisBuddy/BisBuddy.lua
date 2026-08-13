@@ -3900,22 +3900,58 @@ function BisBuddyLO.SetRow(i)
 	return r
 end
 
+-- Which sets can you assemble right now, and in how many distinct slots? Scan the WIDE pool
+-- (D.slotPool = every item your class can use), gated by the SAME phase/difficulty/sources/
+-- proficiency filter the custom-weight ranker uses. activeSlotRanks is only bisbeard's curated
+-- BiS in default-weight mode, so it misses most sets (you'd see ~7 instead of dozens). Cached
+-- against a spec/phase/difficulty/sources signature so search + scroll don't rescan.
+function BisBuddyLO.SetPresence()
+	local sig = (specKey or "?") .. "@" .. (db.phase or 0) .. "/" .. (db.raidDiff or 0) .. "/" .. (db.mplusDiff or 0)
+	if db.sources then for _, s in ipairs(SOURCE_BUCKETS) do if db.sources[s[1]] == false then sig = sig .. "-" .. s[1] end end end
+	if BisBuddyLO.setPresence and BisBuddyLO.setPresenceSig == sig then return BisBuddyLO.setPresence end
+	local present, stype = {}, {}   -- setName -> distinct member slots present + its armor type (for search)
+	local function diffOK(info)
+		local src, tier = info[8], (info[5] or 1)
+		if src == "raid" then return tier <= db.raidDiff end
+		if src == "dungeon" then return tier <= db.mplusDiff end
+		return true
+	end
+	if D.slotPool then
+		for slot, ids in pairs(D.slotPool) do
+			local seen = {}
+			for i = 1, #ids do
+				local id = ids[i]; local it = D.items[id]; local sn = it and it[10]
+				if sn and sn ~= "" and not seen[sn]
+					and (it[4] or 1) <= db.phase and diffOK(it)
+					and not IsExcludedItem(id) and CanUseByType(it[9], slot) then
+					seen[sn] = true
+					present[sn] = (present[sn] or 0) + 1
+					if not stype[sn] then stype[sn] = it[9] end
+				end
+			end
+		end
+	else   -- no wide pool baked: fall back to the active (curated) ranks
+		for _, list in pairs(activeSlotRanks) do
+			local seen = {}
+			for _, e in ipairs(list) do
+				local it = D.items[e[1]]; local sn = it and it[10]
+				if sn and sn ~= "" and not seen[sn] then
+					seen[sn] = true; present[sn] = (present[sn] or 0) + 1
+					if not stype[sn] then stype[sn] = it[9] end
+				end
+			end
+		end
+	end
+	BisBuddyLO.setPresence, BisBuddyLO.setPresenceSig = { present = present, stype = stype }, sig
+	return BisBuddyLO.setPresence
+end
+
 function BisBuddyLO.ShowSets()
 	local f = BisBuddyLO.panel
 	if not (f and f.setsPanel) then return end
 	BisBuddyLO.CenterMode("sets")
-	local present, stype = {}, {}   -- setName -> member slots present + its armor type (for search)
-	for _, list in pairs(activeSlotRanks) do
-		local seen = {}
-		for _, e in ipairs(list) do
-			local it = D.items[e[1]]; local sn = it and it[10]
-			if sn and sn ~= "" and not seen[sn] then
-				seen[sn] = true
-				present[sn] = (present[sn] or 0) + 1
-				if not stype[sn] and it[9] then stype[sn] = it[9] end
-			end
-		end
-	end
+	local sp = BisBuddyLO.SetPresence()   -- every set you can assemble now (wide pool, cached)
+	local present, stype = sp.present, sp.stype
 	local q = strlower(strtrim(BisBuddyLO.setSearch or ""))   -- filter by name / armor type / bonus text
 	local rel = {}
 	for name, cnt in pairs(present) do
