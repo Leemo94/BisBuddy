@@ -3383,11 +3383,11 @@ end
 
 -- BiS target {id, score} for a gear slot, unioning weapon / off-hand variants
 -- (caster off-hands are "Held In Off-hand"/"Shield", not the "Off Hand" weapon key).
--- n = which rank to show (Ring 2 / Trinket 2 show the 2nd-best, not a duplicate of #1).
+-- excludeName = a name already shown for this slot in an earlier cell (Ring 2 / Trinket 2 skip
+-- a same-name / lower-difficulty copy of slot 1, since those items are unique-equipped).
 -- Weapons decide 1H+off-hand vs 2H as a unit: if the best 2H beats best-1H + best-off-hand,
 -- the 2H fills Main Hand and Off Hand is flagged "covered by your 2-hander" (3rd return).
-function BisBuddyLO.TargetFor(bslot, n)
-	n = n or 1
+function BisBuddyLO.TargetFor(bslot, excludeName)
 	local ar = activeSlotRanks
 	local function nth(s, k) local l = ar[s]; local e = l and l[k]; if e then return e[1], e[2] else return nil, 0 end end
 	if bslot == "Main Hand" or bslot == "Off Hand" then
@@ -3403,7 +3403,14 @@ function BisBuddyLO.TargetFor(bslot, n)
 			if bslot == "Main Hand" then return mhId, mhSc else return ohId, ohSc end
 		end
 	end
-	return nth(bslot, n)
+	local l = ar[bslot]
+	if l then
+		for _, e in ipairs(l) do
+			local it = D.items[e[1]]
+			if not excludeName or not it or it[1] ~= excludeName then return e[1], e[2] end
+		end
+	end
+	return nil, 0
 end
 
 function BisBuddyLO.Cell(col, idx)
@@ -3425,17 +3432,17 @@ end
 
 function BisBuddyLO.RenderCol(col, idxList, bagIds, bagByName)
 	if col.cells then for _, c in ipairs(col.cells) do c:Hide() end end
-	local seen, sumEq, sumBis = {}, 0, 0
+	local usedName, sumEq, sumBis = {}, 0, 0
 	for pos, gi in ipairs(idxList) do
 		local gs = GEAR_SLOTS[gi]
 		local iv, label, bslot = gs[1], gs[2], gs[3]
-		seen[bslot] = (seen[bslot] or 0) + 1              -- Ring 2 / Trinket 2 -> 2nd-best target
-		local tid, tscore, used2H = BisBuddyLO.TargetFor(bslot, seen[bslot])
+		local tid, tscore, used2H = BisBuddyLO.TargetFor(bslot, usedName[bslot])   -- Ring 2 / Trinket 2 skip slot-1's item
 		local eqLink = GetInventoryItemLink("player", iv)
 		local eqId = eqLink and ItemIdFromLink(eqLink)
 		local eqScore = eqLink and ScoreLink(eqLink) or nil
 		local eqRank = eqId and rankIndex[eqId] and rankIndex[eqId].rank
 		local tname = tid and D.items[tid] and D.items[tid][1]
+		if tname then usedName[bslot] = tname end
 		local ownExact = (tid and bagIds[tid] and eqId ~= tid) or false   -- BiS itself sitting in bags
 		local alt = tname and bagByName[tname]                             -- a same-name (diff-difficulty) copy in bags
 		local ownAny = (alt and alt.id ~= tid and alt.id ~= eqId) or false
