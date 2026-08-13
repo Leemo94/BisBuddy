@@ -3413,6 +3413,22 @@ function BisBuddyLO.TargetFor(bslot, excludeName)
 	return nil, 0
 end
 
+-- All ranked items to list for a display slot, unioning weapon / off-hand variants
+-- (the Off Hand cell must list shields + held-in-off-hand, which live under other slot keys).
+function BisBuddyLO.MergedRanks(bslot)
+	local cands
+	if bslot == "Main Hand" then cands = { "Main Hand", "One-Hand", "Two-Hand" }
+	elseif bslot == "Off Hand" then cands = { "Off Hand", "One-Hand", "Held In Off-hand", "Shield" }
+	else return activeSlotRanks[bslot] end
+	local merged = {}
+	for _, s in ipairs(cands) do
+		local l = activeSlotRanks[s]
+		if l then for k = 1, #l do merged[#merged + 1] = l[k] end end
+	end
+	table.sort(merged, function(a, b) return a[2] > b[2] end)
+	return merged
+end
+
 -- The difficulty / keystone tier off an item's tooltip (line 2 reads e.g. "Mythic 4").
 -- bisbeard only itemizes M+10, so equipped M+4/M+6 etc. aren't in D.items - read it live.
 -- Cached per item id (tier never changes for a given id).
@@ -3547,7 +3563,7 @@ function BisBuddyLO.ListRow(i)
 		local iv = BisBuddyLO.selIv
 		if not (iv and db) then return end
 		db.loTargets = db.loTargets or {}
-		db.loTargets[iv] = (db.loTargets[iv] == self.itemId) and nil or self.itemId   -- toggle this slot's goal
+		if db.loTargets[iv] == self.itemId then db.loTargets[iv] = nil else db.loTargets[iv] = self.itemId end  -- toggle goal
 		BisBuddyLO.Render()                                                            -- repaints cells + re-shows the list
 	end)
 	f.listRows[i] = r
@@ -3576,7 +3592,7 @@ function BisBuddyLO.ShowList(bslot, iv)
 			eqTier and (" |cff888888" .. eqTier .. "|r") or "", math.floor((eqScore or 0) + 0.5))
 	end
 	f.listTitle:SetText(format("|cffffd100%s|r%s", (BROWSE_SLOT_LABEL[bslot] or bslot), now))
-	local list = activeSlotRanks[bslot]
+	local list = BisBuddyLO.MergedRanks(bslot)
 	local base = BaselineForSlot(bslot)
 	local seenName, order = {}, {}                          -- best variant per item name (score-sorted list)
 	if list then
