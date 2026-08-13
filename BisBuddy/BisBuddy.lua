@@ -3366,7 +3366,7 @@ BisBuddyLO = { panel = nil }   -- global (not local) to stay under the 200-local
 BisBuddyLO.COL = {
 	equipped = { 0.21, 0.79, 0.29 }, bags = { 0.88, 0.64, 0.13 },
 	close = { 0.91, 0.45, 0.17 }, upgrade = { 0.78, 0.27, 0.24 },
-	setlock = { 0.55, 0.42, 0.15 },
+	setlock = { 0.55, 0.42, 0.15 }, none = { 0.50, 0.50, 0.53 },
 }
 BisBuddyLO.LEFT  = { 1, 2, 3, 4, 5, 6, 15, 16 }        -- GEAR_SLOTS idx: Head..Wrist, MainHand, OffHand
 BisBuddyLO.RIGHT = { 7, 8, 9, 10, 11, 12, 13, 14, 17 } -- Hands..Trinket2, Ranged
@@ -3374,18 +3374,33 @@ BisBuddyLO.RIGHT = { 7, 8, 9, 10, 11, 12, 13, 14, 17 } -- Hands..Trinket2, Range
 -- pure have/need classifier (status key from the facts)
 function BisBuddyLO.Classify(eqId, targetId, ownExact, ownAny, eqRank, setLocked)
 	if setLocked then return "setlock" end
-	if not targetId then return eqId and "equipped" or "upgrade" end
+	if not targetId then return "none" end   -- no BiS data for this slot: don't claim "equipped BiS"
 	if eqId == targetId then return "equipped" end
 	if ownExact then return "bags" end
 	if ownAny or (eqRank and eqRank <= 5) then return "close" end
 	return "upgrade"
 end
 
+-- BiS target {id, score} for a gear slot, unioning weapon / off-hand variants
+-- (caster off-hands are "Held In Off-hand"/"Shield", not the "Off Hand" weapon key).
+function BisBuddyLO.TargetFor(bslot)
+	local cands
+	if bslot == "Main Hand" then cands = { "Main Hand", "One-Hand", "Two-Hand" }
+	elseif bslot == "Off Hand" then cands = { "Off Hand", "Held In Off-hand", "Shield", "One-Hand" }
+	else cands = { bslot } end
+	local bId, bSc
+	for _, s in ipairs(cands) do
+		local e = activeSlotRanks[s]; e = e and e[1]
+		if e and (not bSc or e[2] > bSc) then bId, bSc = e[1], e[2] end
+	end
+	return bId, bSc or 0
+end
+
 function BisBuddyLO.Cell(col, idx)
 	col.cells = col.cells or {}
 	if col.cells[idx] then return col.cells[idx] end
 	local c = CreateFrame("Button", nil, col)
-	c:SetWidth(194); c:SetHeight(40)
+	c:SetWidth(296); c:SetHeight(40)
 	c:SetPoint("TOPLEFT", 0, -(idx - 1) * 44)
 	c.bar = c:CreateTexture(nil, "ARTWORK"); c.bar:SetPoint("TOPLEFT", 0, 0); c.bar:SetPoint("BOTTOMLEFT", 0, 0); c.bar:SetWidth(3)
 	c.icon = c:CreateTexture(nil, "ARTWORK"); c.icon:SetPoint("LEFT", 8, 0); c.icon:SetWidth(30); c.icon:SetHeight(30); c.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
@@ -3398,48 +3413,49 @@ function BisBuddyLO.Cell(col, idx)
 	return c
 end
 
-function BisBuddyLO.RenderCol(col, idxList, owned, ownedNames)
+function BisBuddyLO.RenderCol(col, idxList, bagIds, bagByName)
 	if col.cells then for _, c in ipairs(col.cells) do c:Hide() end end
 	local sumEq, sumBis = 0, 0
 	for pos, gi in ipairs(idxList) do
 		local gs = GEAR_SLOTS[gi]
 		local iv, label, bslot = gs[1], gs[2], gs[3]
-		local list = activeSlotRanks[bslot]
-		local tid = list and list[1] and list[1][1]
-		local tscore = (list and list[1] and list[1][2]) or 0
+		local tid, tscore = BisBuddyLO.TargetFor(bslot)
 		local eqLink = GetInventoryItemLink("player", iv)
 		local eqId = eqLink and ItemIdFromLink(eqLink)
 		local eqScore = eqLink and ScoreLink(eqLink) or nil
 		local eqRank = eqId and rankIndex[eqId] and rankIndex[eqId].rank
-		local ownExact = (tid and owned[tid] and eqId ~= tid) or false
 		local tname = tid and D.items[tid] and D.items[tid][1]
-		local ownAny = (tname and ownedNames[tname] and not ownExact and eqId ~= tid) or false
+		local ownExact = (tid and bagIds[tid] and eqId ~= tid) or false   -- BiS itself sitting in bags
+		local alt = tname and bagByName[tname]                             -- a same-name (diff-difficulty) copy in bags
+		local ownAny = (alt and alt.id ~= tid and alt.id ~= eqId) or false
 		local status = BisBuddyLO.Classify(eqId, tid, ownExact, ownAny, eqRank, false)
 		local cell = BisBuddyLO.Cell(col, pos)
-		cell.itemId = tid
+		cell.itemId = tid or eqId
 		local rc = BisBuddyLO.COL[status]
 		cell.bar:SetTexture(rc[1], rc[2], rc[3])
 		if tid then
 			cell.icon:SetTexture(select(10, GetItemInfo(tid)) or "Interface\\Icons\\INV_Misc_QuestionMark")
-			cell.nmFS:SetText("|cffa335ee" .. Clip(tname or ("item " .. tid), 22) .. "|r")
+			cell.nmFS:SetText("|cffa335ee" .. Clip(tname or ("item " .. tid), 40) .. "|r")
 		else
-			cell.icon:SetTexture("Interface\\PaperDoll\\UI-Backpack-EmptySlot")
-			cell.nmFS:SetText("|cff909090" .. label .. "|r")
+			cell.icon:SetTexture((eqLink and select(10, GetItemInfo(eqLink))) or "Interface\\PaperDoll\\UI-Backpack-EmptySlot")
+			cell.nmFS:SetText("|cffb0b0b0" .. label .. "|r")
 		end
 		local delta = math.floor((tscore - (eqScore or 0)) + 0.5)
 		local line
-		if status == "equipped" then
+		if status == "none" then
+			line = eqLink and "|cff808080equipped \226\128\148 no BiS data|r" or ("|cff808080" .. label .. " \226\128\148 no BiS data|r")
+		elseif status == "equipped" then
 			line = "|cff35c94a\226\156\147 equipped (BiS)|r"
 		elseif status == "bags" then
-			line = "|cffe0a422in your bags \226\128\148 equip it|r"
-		elseif status == "close" and ownAny then
-			line = "|cffe8722cown another version \226\128\148 upgrade the tier|r"
+			line = "|cffe0a422BiS is in your bags \226\128\148 equip it|r"
+		elseif ownAny then
+			line = format("|cffe8722chave the %s in bags. Upgrade +%d|r", (alt.ver ~= "" and alt.ver) or "another", delta)
 		elseif not eqLink then
-			line = format("|cffc8443c(%s empty) Upgrade +%d|r", label, delta)
+			line = format("|cffc8443c%s empty. Upgrade +%d|r", label, delta)
 		else
 			local hex = (status == "close") and "e8722c" or "c8443c"
 			local en = (eqId and D.items[eqId] and D.items[eqId][1]) or "your item"
-			line = format("|cff%sEquipped %s. Upgrade +%d|r", hex, Clip(en, 14), delta)
+			line = format("|cff%sEquipped %s. Upgrade +%d|r", hex, Clip(en, 22), delta)
 		end
 		cell.stat:SetText(line)
 		cell:Show()
@@ -3456,11 +3472,20 @@ function BisBuddyLO.Render()
 		return
 	end
 	wipe(equippedScoreCache)
-	local best, owned = ScanBags()
-	local ownedNames = {}
-	for id in pairs(owned) do local it = D.items[id]; if it then ownedNames[it[1]] = true end end
-	local e1, b1 = BisBuddyLO.RenderCol(f.leftCol, BisBuddyLO.LEFT, owned, ownedNames)
-	local e2, b2 = BisBuddyLO.RenderCol(f.rightCol, BisBuddyLO.RIGHT, owned, ownedNames)
+	local bagIds, bagByName = {}, {}
+	for bag = 0, 4 do
+		for s = 1, (GetContainerNumSlots(bag) or 0) do
+			local link = GetContainerItemLink(bag, s)
+			local id = link and ItemIdFromLink(link)
+			if id then
+				bagIds[id] = true
+				local it = D.items[id]
+				if it and not bagByName[it[1]] then bagByName[it[1]] = { id = id, ver = it[2] } end
+			end
+		end
+	end
+	local e1, b1 = BisBuddyLO.RenderCol(f.leftCol, BisBuddyLO.LEFT, bagIds, bagByName)
+	local e2, b2 = BisBuddyLO.RenderCol(f.rightCol, BisBuddyLO.RIGHT, bagIds, bagByName)
 	f.header:SetText(format("|cffffd100%s|r  \226\128\148  Current |cff35c94a%d|r  /  BiS |cffffd100%d|r",
 		(strmatch(specKey, "|(.+)$") or specKey), math.floor(e1 + e2 + 0.5), math.floor(b1 + b2 + 0.5)))
 end
@@ -3468,7 +3493,7 @@ end
 function BisBuddyLO.Create()
 	if BisBuddyLO.panel then return BisBuddyLO.panel end
 	local f = CreateFrame("Frame", "BisBuddyLoadoutFrame", UIParent)
-	f:SetWidth(560); f:SetHeight(460); f:SetPoint("CENTER"); f:SetFrameStrata("DIALOG")
+	f:SetWidth(784); f:SetHeight(470); f:SetPoint("CENTER"); f:SetFrameStrata("DIALOG")
 	StyleDialog(f)
 	f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
 	f:SetScript("OnDragStart", f.StartMoving)
@@ -3479,10 +3504,10 @@ function BisBuddyLO.Create()
 	local close = CreateFrame("Button", nil, f, "UIPanelCloseButton"); close:SetPoint("TOPRIGHT", -6, -6)
 	f.header = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	f.header:SetPoint("TOPLEFT", 18, -40); f.header:SetJustifyH("LEFT")
-	f.leftCol = CreateFrame("Frame", nil, f); f.leftCol:SetPoint("TOPLEFT", 12, -62); f.leftCol:SetWidth(196); f.leftCol:SetHeight(380)
-	f.rightCol = CreateFrame("Frame", nil, f); f.rightCol:SetPoint("TOPRIGHT", -12, -62); f.rightCol:SetWidth(196); f.rightCol:SetHeight(380)
+	f.leftCol = CreateFrame("Frame", nil, f); f.leftCol:SetPoint("TOPLEFT", 12, -64); f.leftCol:SetWidth(300); f.leftCol:SetHeight(390)
+	f.rightCol = CreateFrame("Frame", nil, f); f.rightCol:SetPoint("TOPRIGHT", -12, -64); f.rightCol:SetWidth(300); f.rightCol:SetHeight(390)
 	f.center = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-	f.center:SetPoint("TOP", 0, -84); f.center:SetWidth(140); f.center:SetJustifyH("CENTER")
+	f.center:SetPoint("TOP", 0, -90); f.center:SetWidth(150); f.center:SetJustifyH("CENTER")
 	f.center:SetText("|cff808080Set Bonuses\n(coming)\n\nclick a slot for\nits item list|r")
 	f:Hide()
 	BisBuddyLO.panel = f
