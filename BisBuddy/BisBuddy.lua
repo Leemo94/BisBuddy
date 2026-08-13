@@ -3379,12 +3379,14 @@ BisBuddyLO.LEFT  = { 1, 2, 3, 4, 5, 6, 15, 16 }        -- GEAR_SLOTS idx: Head..
 BisBuddyLO.RIGHT = { 7, 8, 9, 10, 11, 12, 13, 14, 17 } -- Hands..Trinket2, Ranged
 
 -- pure have/need classifier (status key from the facts)
-function BisBuddyLO.Classify(eqId, targetId, ownExact, ownAny, eqRank, setLocked)
+function BisBuddyLO.Classify(eqId, targetId, ownExact, ownAny, eqRank, setLocked, sameVer)
 	if setLocked then return "setlock" end
 	if not targetId then return "none" end   -- no BiS data for this slot: don't claim "equipped BiS"
 	if eqId == targetId then return "equipped" end
 	if ownExact then return "bags" end
-	if ownAny or (eqRank and eqRank <= 5) then return "close" end
+	-- orange = you already own a VERSION of the BiS item (equipped a lower tier, or a copy in bags),
+	-- so it's an upgrade-the-tier not a chase-a-new-item (Mythic->M+10, Worldforged->higher forge).
+	if sameVer or ownAny or (eqRank and eqRank <= 5) then return "close" end
 	return "upgrade"
 end
 
@@ -3559,7 +3561,9 @@ function BisBuddyLO.RenderCol(col, idxList, bagIds, bagByName)
 		local ownExact = (tid and bagIds[tid] and eqId ~= tid) or false   -- BiS itself sitting in bags
 		local alt = tname and bagByName[tname]                             -- a same-name (diff-difficulty) copy in bags
 		local ownAny = (alt and alt.id ~= tid and alt.id ~= eqId) or false
-		local status = (wflag == "covered") and "none" or BisBuddyLO.Classify(eqId, tid, ownExact, ownAny, eqRank, isSet)
+		local eqName = (eqLink and GetItemInfo(eqLink)) or (eqId and D.items[eqId] and D.items[eqId][1])
+		local sameVer = (eqName and tname and eqName == tname and eqId ~= tid) or false   -- equipped a lower tier of the BiS item
+		local status = (wflag == "covered") and "none" or BisBuddyLO.Classify(eqId, tid, ownExact, ownAny, eqRank, isSet, sameVer)
 		local cell = BisBuddyLO.Cell(col, pos)
 		cell.itemId = tid or eqId
 		cell.bslot, cell.iv = bslot, iv
