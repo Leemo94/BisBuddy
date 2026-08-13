@@ -3962,6 +3962,8 @@ function BisBuddyLO.Render()
 	local e2, b2 = BisBuddyLO.RenderCol(f.rightCol, BisBuddyLO.RIGHT, bagIds, bagByName)
 	f.header:SetText(format("|cffffd100%s|r  \226\128\148  Current |cff35c94a%d|r  /  BiS |cffffd100%d|r",
 		(strmatch(specKey, "|(.+)$") or specKey), math.floor(e1 + e2 + 0.5), math.floor(b1 + b2 + 0.5)))
+	if f.raidBtn then f.raidBtn:SetText("Raid: " .. DiffLabel(db.raidDiff)) end
+	if f.mpBtn then f.mpBtn:SetText("M+: " .. DiffLabel(db.mplusDiff)) end
 	if f.wpnBtn then   -- weapon-view toggle: only when the spec has BOTH a 2H and a 1H/off-hand option
 		local hasTwo = activeSlotRanks["Two-Hand"] and #activeSlotRanks["Two-Hand"] > 0
 		local hasOne = (activeSlotRanks["One-Hand"] and #activeSlotRanks["One-Hand"] > 0)
@@ -4014,6 +4016,17 @@ function BisBuddyLO.Create()
 	end)
 	f.wpnInfo = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")   -- 2H vs 1H+OH weapon totals, at a glance
 	f.wpnInfo:SetPoint("RIGHT", f.wpnBtn, "LEFT", -8, 0); f.wpnInfo:SetJustifyH("RIGHT")
+	-- difficulty cycle buttons (re-rank live via SetDiff -> BuildRankIndex)
+	f.raidBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+	f.raidBtn:SetWidth(104); f.raidBtn:SetHeight(18); f.raidBtn:SetPoint("TOPLEFT", 330, -37); f.raidBtn:SetText("Raid")
+	f.raidBtn:SetScript("OnClick", function() SetDiff("raid", (db.raidDiff or 4) % 4 + 1, true) end)   -- Normal->Heroic->Mythic->Ascended
+	f.mpBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+	f.mpBtn:SetWidth(104); f.mpBtn:SetHeight(18); f.mpBtn:SetPoint("LEFT", f.raidBtn, "RIGHT", 6, 0); f.mpBtn:SetText("M+")
+	f.mpBtn:SetScript("OnClick", function()
+		local order, cur, idx = { 1, 2, 3, 5 }, db.mplusDiff or 5, 1   -- Normal/Heroic/Mythic/M+10 (no Ascended for dungeon)
+		for i, v in ipairs(order) do if v == cur then idx = i end end
+		SetDiff("mplus", order[idx % #order + 1], true)
+	end)
 	f.leftCol = CreateFrame("Frame", nil, f); f.leftCol:SetPoint("TOPLEFT", 14, -64); f.leftCol:SetWidth(300); f.leftCol:SetHeight(390)
 	f.rightCol = CreateFrame("Frame", nil, f); f.rightCol:SetPoint("TOPRIGHT", -14, -64); f.rightCol:SetWidth(300); f.rightCol:SetHeight(390)
 	f.center = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
