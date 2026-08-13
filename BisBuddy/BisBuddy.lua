@@ -756,6 +756,7 @@ CAP.spec = {
 	["Templar|Zealot"] = { hit="melee", exp=true, spen=true },
 	["Templar|Crusader"] = { hit="melee", exp=true, spen=true },
 	["Bloodmage|Sanguine"] = { hit="spell", spen=true },
+	["Bloodmage|Fleshweaver"] = { hit="spell", spen=true },   -- bisbeard 2026-08: Fleshweaver now gets spen + spell hit cap
 	["Bloodmage|Accursed"] = { hit="melee", exp=true, spen=true },
 	["Bloodmage|Eternal"] = { hit="melee", exp=true, spen=true },
 	["Ranger|Archery"] = { hit="ranged" },
@@ -783,9 +784,10 @@ CAP.spec = {
 	["Venomancer|Fortitude"] = { hit="melee", exp=true, spen=true },
 	["Venomancer|Stalking"] = { hit="melee", exp=true, spen=true },
 	["Venomancer|Rotweaver"] = { hit="spell", spen=true },
-	["Reaper|Soul"] = { hit="melee", exp=true },
-	["Reaper|Harvest"] = { hit="melee", exp=true },
-	["Reaper|Domination"] = { hit="melee", exp=true },
+	-- Reaper gets +6% hit from a talent (= 60 rating), so gear only needs 80-60 = 20 to cap
+	["Reaper|Soul"] = { hit="melee", exp=true, hitCap=20 },
+	["Reaper|Harvest"] = { hit="melee", exp=true, hitCap=20 },
+	["Reaper|Domination"] = { hit="melee", exp=true, hitCap=20 },
 	["Primalist|Grovekeeper"] = { hit="melee", exp=true },
 	["Primalist|Wildwalker"] = { hit="melee", exp=true },
 	["Primalist|Mountain King"] = { hit="melee", exp=true },
@@ -818,7 +820,7 @@ local function CapContext()
 	end
 	local ctx = { curHit = curHit, curExp = curExp, curSpen = curSpen }
 	if caps.hit then
-		ctx.hitCap = CAP[caps.hit]
+		ctx.hitCap = caps.hitCap or CAP[caps.hit]   -- per-spec override (e.g. Reaper's talent hit reduces the gear cap)
 		ctx.hitRemaining = math.max(0, (ctx.hitCap or 0) - curHit)
 	end
 	if caps.exp then
@@ -1758,7 +1760,7 @@ local function RefreshWeightsPanel()
 	local caps = specKey and CAP.spec[specKey]
 	if caps and (caps.hit or caps.exp or caps.spen) then
 		local parts = {}
-		if caps.hit then parts[#parts + 1] = format("%s hit %d", caps.hit, CAP[caps.hit] or 0) end
+		if caps.hit then parts[#parts + 1] = format("%s hit %d", caps.hit, caps.hitCap or CAP[caps.hit] or 0) end
 		if caps.exp then parts[#parts + 1] = format("expertise %d", CAP.exp) end
 		if caps.spen then parts[#parts + 1] = format("spell pen %d", CAP.spen) end
 		weightsPanel.capLine:SetText("|cffffcc55Raid caps:|r " .. table.concat(parts, "  |cff666666/|r  ") ..
