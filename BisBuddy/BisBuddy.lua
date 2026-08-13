@@ -3633,17 +3633,14 @@ function BisBuddyLO.ListRow(i)
 end
 
 function BisBuddyLO.HideList()
-	BisBuddyLO.sel, BisBuddyLO.selIv = nil, nil
-	local f = BisBuddyLO.panel
-	if f then if f.list then f.list:Hide() end; if f.center then f.center:Show() end end
+	BisBuddyLO.CenterMode("home")
 end
 
 function BisBuddyLO.ShowList(bslot, iv)
 	local f = BisBuddyLO.panel
 	if not (f and f.list) then return end
 	BisBuddyLO.sel, BisBuddyLO.selIv = bslot, iv
-	if f.center then f.center:Hide() end
-	f.list:Show()
+	BisBuddyLO.CenterMode("list")
 	local eqLink = iv and GetInventoryItemLink("player", iv)
 	local eqName = eqLink and GetItemInfo(eqLink)
 	local eqScore = eqLink and ScoreLink(eqLink)
@@ -3723,6 +3720,95 @@ function BisBuddyLO.ArmRetry()
 	rf:Show()
 end
 
+-- the center hosts one of: home placeholder / slot item-list / Weights editor / Sources editor
+function BisBuddyLO.CenterMode(mode)
+	local f = BisBuddyLO.panel
+	if not f then return end
+	BisBuddyLO.mode = mode
+	if mode ~= "list" then BisBuddyLO.sel, BisBuddyLO.selIv = nil, nil end
+	local function sw(fr, on) if fr then if on then fr:Show() else fr:Hide() end end end
+	sw(f.center, mode == "home")
+	sw(f.list, mode == "list")
+	sw(f.weightsPanel, mode == "weights")
+	sw(f.sourcesPanel, mode == "sources")
+end
+
+function BisBuddyLO.WRow(i)
+	local f = BisBuddyLO.panel
+	f.wRows = f.wRows or {}
+	if f.wRows[i] then return f.wRows[i] end
+	local wp = f.weightsPanel
+	local x = 9 + ((i - 1) % 2) * 142
+	local y = -42 - math.floor((i - 1) / 2) * 19
+	local lbl = wp:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	lbl:SetPoint("TOPLEFT", x, y); lbl:SetWidth(86); lbl:SetJustifyH("LEFT")
+	local edit = CreateFrame("EditBox", "BisBuddyLoWEdit" .. i, wp, "InputBoxTemplate")
+	edit:SetPoint("TOPLEFT", x + 88, y + 2); edit:SetWidth(40); edit:SetHeight(16); edit:SetAutoFocus(false)
+	edit:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+	edit:SetScript("OnEscapePressed", function(self) self:ClearFocus(); BisBuddyLO.ShowWeights() end)
+	edit:SetScript("OnEditFocusLost", function(self) ApplyWeightEdit(self.key, self:GetText()); BisBuddyLO.ShowWeights() end)
+	f.wRows[i] = { lbl = lbl, edit = edit }
+	return f.wRows[i]
+end
+
+function BisBuddyLO.ShowWeights()
+	local f = BisBuddyLO.panel
+	if not (f and f.weightsPanel) then return end
+	BisBuddyLO.CenterMode("weights")
+	local base = (specKey and D.weights[specKey]) or {}
+	local custom = specKey and CustomTable(specKey) or nil
+	f.wpTitle:SetText("|cffffd100Weights|r" .. (specKey and ("  |cff9a94a6" .. (strmatch(specKey, "|(.+)$") or specKey) .. "|r") or ""))
+	f.wpSub:SetText(IsSpecCustom() and "|cffcc66ffcustom|r — type a number, Enter; blank = default"
+		or "|cff808080bisbeard defaults — edit any value to re-rank|r")
+	local pick = {}
+	for _, s in ipairs(WEIGHT_STATS) do
+		local eff = (custom and custom[s[1]]) or base[s[1]] or 0
+		if BisBuddyLO.wAll or eff ~= 0 or (custom and custom[s[1]] ~= nil) then pick[#pick + 1] = s end
+	end
+	if #pick == 0 then pick = WEIGHT_STATS end
+	if f.wRows then for _, r in ipairs(f.wRows) do r.lbl:Hide(); r.edit:Hide() end end
+	for i, s in ipairs(pick) do
+		local r = BisBuddyLO.WRow(i)
+		local overridden = custom and custom[s[1]] ~= nil
+		local eff = (overridden and custom[s[1]]) or base[s[1]] or 0
+		r.key, r.edit.key = s[1], s[1]
+		r.lbl:SetText(s[2]); r.lbl:Show()
+		if overridden then r.lbl:SetTextColor(0.8, 0.5, 1) else r.lbl:SetTextColor(0.72, 0.72, 0.78) end
+		if not r.edit:HasFocus() then r.edit:SetText(tostring(eff)) end
+		r.edit:Show()
+	end
+	f.wpAll:SetText(BisBuddyLO.wAll and "Active only" or "Show all")
+end
+
+function BisBuddyLO.SRow(i)
+	local f = BisBuddyLO.panel
+	f.sRows = f.sRows or {}
+	if f.sRows[i] then return f.sRows[i] end
+	local sp = f.sourcesPanel
+	local x = 10 + ((i - 1) % 2) * 142
+	local y = -42 - math.floor((i - 1) / 2) * 24
+	local cb = CreateFrame("CheckButton", "BisBuddyLoSrc" .. i, sp, "UICheckButtonTemplate")
+	cb:SetWidth(20); cb:SetHeight(20); cb:SetPoint("TOPLEFT", x, y)
+	local txt = _G["BisBuddyLoSrc" .. i .. "Text"]; txt:SetFontObject(GameFontHighlightSmall)
+	cb:SetScript("OnClick", function(self) SetSource(self.key, self:GetChecked() and true or false) end)
+	f.sRows[i] = { cb = cb, txt = txt }
+	return f.sRows[i]
+end
+
+function BisBuddyLO.ShowSources()
+	local f = BisBuddyLO.panel
+	if not (f and f.sourcesPanel) then return end
+	BisBuddyLO.CenterMode("sources")
+	db.sources = db.sources or {}
+	for i, s in ipairs(SOURCE_BUCKETS) do
+		local r = BisBuddyLO.SRow(i)
+		r.key, r.cb.key = s[1], s[1]
+		r.txt:SetText(s[2])
+		r.cb:SetChecked(db.sources[s[1]] ~= false)
+		r.cb:Show(); r.txt:Show()
+	end
+end
+
 function BisBuddyLO.Render()
 	local f = BisBuddyLO.panel
 	if not f or not f:IsShown() then return end
@@ -3784,14 +3870,47 @@ function BisBuddyLO.Create()
 	f.listTitle:SetPoint("TOPLEFT", 4, -2); f.listTitle:SetPoint("RIGHT", -4, 0); f.listTitle:SetJustifyH("LEFT")
 	f.listHint = f.list:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 	f.listHint:SetPoint("BOTTOMLEFT", 4, 8); f.listHint:SetJustifyH("LEFT")
-	-- control bar: the loadout is the home screen, so the other panels are reachable from here
-	local BAR = { { "Settings", "setup" }, { "Weights", "weights" }, { "Sources", "sources" }, { "Reserve", "sr" }, { "Talents", "talents" } }
+
+	-- inline Weights editor (shown in the center when the Weights button is pressed)
+	f.weightsPanel = CreateFrame("Frame", nil, f)
+	f.weightsPanel:SetPoint("TOP", 0, -58); f.weightsPanel:SetWidth(288); f.weightsPanel:SetHeight(400); f.weightsPanel:Hide()
+	f.weightsPanel:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+	f.weightsPanel:SetBackdropColor(0.07, 0.07, 0.094, 0.9); f.weightsPanel:SetBackdropBorderColor(0.17, 0.17, 0.21, 1)
+	f.wpTitle = f.weightsPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.wpTitle:SetPoint("TOPLEFT", 9, -7); f.wpTitle:SetPoint("RIGHT", -26, 0); f.wpTitle:SetJustifyH("LEFT")
+	f.wpSub = f.weightsPanel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall"); f.wpSub:SetPoint("TOPLEFT", 9, -23); f.wpSub:SetJustifyH("LEFT")
+	local wpClose = CreateFrame("Button", nil, f.weightsPanel, "UIPanelCloseButton"); wpClose:SetWidth(26); wpClose:SetHeight(26); wpClose:SetPoint("TOPRIGHT", 3, 4)
+	wpClose:SetScript("OnClick", function() BisBuddyLO.CenterMode("home") end)
+	f.wpAll = CreateFrame("Button", nil, f.weightsPanel, "UIPanelButtonTemplate"); f.wpAll:SetWidth(90); f.wpAll:SetHeight(20); f.wpAll:SetPoint("BOTTOMLEFT", 8, 8); f.wpAll:SetText("Show all")
+	f.wpAll:SetScript("OnClick", function() BisBuddyLO.wAll = not BisBuddyLO.wAll; BisBuddyLO.ShowWeights() end)
+	f.wpReset = CreateFrame("Button", nil, f.weightsPanel, "UIPanelButtonTemplate"); f.wpReset:SetWidth(90); f.wpReset:SetHeight(20); f.wpReset:SetPoint("BOTTOMRIGHT", -8, 8); f.wpReset:SetText("Reset")
+	f.wpReset:SetScript("OnClick", function() if specKey then db.customWeights[specKey] = nil; BuildRankIndex(); wipe(equippedScoreCache); BisBuddyLO.ShowWeights() end end)
+
+	-- inline Sources editor
+	f.sourcesPanel = CreateFrame("Frame", nil, f)
+	f.sourcesPanel:SetPoint("TOP", 0, -58); f.sourcesPanel:SetWidth(288); f.sourcesPanel:SetHeight(400); f.sourcesPanel:Hide()
+	f.sourcesPanel:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+	f.sourcesPanel:SetBackdropColor(0.07, 0.07, 0.094, 0.9); f.sourcesPanel:SetBackdropBorderColor(0.17, 0.17, 0.21, 1)
+	f.spTitle = f.sourcesPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.spTitle:SetPoint("TOPLEFT", 9, -7); f.spTitle:SetText("|cffffd100Sources|r")
+	f.spSub = f.sourcesPanel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall"); f.spSub:SetPoint("TOPLEFT", 9, -23); f.spSub:SetText("untick to hide a source from BiS")
+	local spClose = CreateFrame("Button", nil, f.sourcesPanel, "UIPanelCloseButton"); spClose:SetWidth(26); spClose:SetHeight(26); spClose:SetPoint("TOPRIGHT", 3, 4)
+	spClose:SetScript("OnClick", function() BisBuddyLO.CenterMode("home") end)
+	f.spAll = CreateFrame("Button", nil, f.sourcesPanel, "UIPanelButtonTemplate"); f.spAll:SetWidth(120); f.spAll:SetHeight(20); f.spAll:SetPoint("BOTTOM", 0, 8); f.spAll:SetText("Enable all")
+	f.spAll:SetScript("OnClick", function() db.sources = db.sources or {}; for _, s in ipairs(SOURCE_BUCKETS) do db.sources[s[1]] = true end; BuildRankIndex(); wipe(equippedScoreCache); BisBuddyLO.ShowSources() end)
+
+	-- control bar: the loadout is the home screen, so the other panels are reachable from here.
+	-- Weights + Sources render inline in the center; Settings / Reserve / Talents open their windows.
+	local BAR = {
+		{ "Settings", function() SlashCmdList["BISBUDDY"]("setup") end },
+		{ "Weights",  function() BisBuddyLO.ShowWeights() end },
+		{ "Sources",  function() BisBuddyLO.ShowSources() end },
+		{ "Reserve",  function() SlashCmdList["BISBUDDY"]("sr") end },
+		{ "Talents",  function() SlashCmdList["BISBUDDY"]("talents") end },
+	}
 	local bx = 14
 	for _, b in ipairs(BAR) do
 		local btn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
 		btn:SetWidth(96); btn:SetHeight(22); btn:SetPoint("BOTTOMLEFT", bx, 12); btn:SetText(b[1])
-		local arg = b[2]
-		btn:SetScript("OnClick", function() SlashCmdList["BISBUDDY"](arg) end)
+		btn:SetScript("OnClick", b[2])
 		bx = bx + 100
 	end
 	f:Hide()
