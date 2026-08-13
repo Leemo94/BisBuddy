@@ -2706,7 +2706,9 @@ local function BrowseRow(f, i)
 	end)
 	r:SetScript("OnLeave", function() GameTooltip:Hide() end)
 	r:SetScript("OnClick", function(self)
-		if IsShiftKeyDown() then
+		if IsControlKeyDown() then
+			if self.itemId then local link = select(2, GetItemInfo(self.itemId)); if link and DressUpItemLink then DressUpItemLink(link) end end
+		elseif IsShiftKeyDown() then
 			if self.itemId then
 				local link = select(2, GetItemInfo(self.itemId))
 				if link and ChatEdit_InsertLink then ChatEdit_InsertLink(link) end
@@ -3186,7 +3188,11 @@ local function GearRow(f, i)
 	end)
 	r:SetScript("OnLeave", function() GameTooltip:Hide() end)
 	r:SetScript("OnClick", function(self)
-		if self.itemId and IsShiftKeyDown() then
+		if not self.itemId then return end
+		if IsControlKeyDown() then
+			local link = select(2, GetItemInfo(self.itemId))
+			if link and DressUpItemLink then DressUpItemLink(link) end
+		elseif IsShiftKeyDown() then
 			local link = select(2, GetItemInfo(self.itemId))
 			if link and ChatEdit_InsertLink then ChatEdit_InsertLink(link) end
 		end
@@ -3471,6 +3477,11 @@ function BisBuddyLO.Cell(col, idx)
 	c:SetScript("OnEnter", function(self) if self.itemId then GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:SetHyperlink("item:" .. self.itemId); GameTooltip:Show() end end)
 	c:SetScript("OnLeave", function() GameTooltip:Hide() end)
 	c:SetScript("OnClick", function(self)
+		if IsControlKeyDown() and self.itemId then
+			local link = select(2, GetItemInfo(self.itemId))
+			if link and DressUpItemLink then DressUpItemLink(link) end
+			return
+		end
 		if not self.bslot then return end
 		if BisBuddyLO.sel == self.bslot then BisBuddyLO.HideList() else BisBuddyLO.ShowList(self.bslot, self.iv) end
 	end)
@@ -3555,6 +3566,11 @@ function BisBuddyLO.ListRow(i)
 	r:SetScript("OnLeave", function() GameTooltip:Hide() end)
 	r:SetScript("OnClick", function(self)
 		if not self.itemId then return end
+		if IsControlKeyDown() then
+			local link = select(2, GetItemInfo(self.itemId))
+			if link and DressUpItemLink then DressUpItemLink(link) end
+			return
+		end
 		if IsShiftKeyDown() then
 			local link = select(2, GetItemInfo(self.itemId))
 			if link and ChatEdit_InsertLink then ChatEdit_InsertLink(link) end
@@ -3618,7 +3634,7 @@ function BisBuddyLO.ShowList(bslot, iv)
 		r.text:SetText(format("%s%s%s%s|r%s  |cff69ccf0%.0f|r", up, mark, ItemHex(g.id), Clip(g.name, 20), ver, g.score))
 		r:Show()
 	end
-	if f.listHint then f.listHint:SetText("|cff707070click a row = set goal (\226\152\133)  \194\183  shift-click = link|r") end
+	if f.listHint then f.listHint:SetText("|cff707070click = set goal (\226\152\133)  \194\183  ctrl = preview  \194\183  shift = link|r") end
 	if #order == 0 then f.listTitle:SetText((f.listTitle:GetText() or "") .. "  |cff808080(no items)|r") end
 end
 
@@ -3721,7 +3737,11 @@ local function SRRow(f, i)
 	end)
 	r:SetScript("OnLeave", function() GameTooltip:Hide() end)
 	r:SetScript("OnClick", function(self)
-		if self.itemId and IsShiftKeyDown() then
+		if not self.itemId then return end
+		if IsControlKeyDown() then
+			local link = select(2, GetItemInfo(self.itemId))
+			if link and DressUpItemLink then DressUpItemLink(link) end
+		elseif IsShiftKeyDown() then
 			local link = select(2, GetItemInfo(self.itemId))
 			if link and ChatEdit_InsertLink then ChatEdit_InsertLink(link) end
 		end
@@ -3779,28 +3799,40 @@ RenderSR = function()
 			end
 		end
 	end
+	local pinned = {}
+	for _, pid in pairs(db.loTargets or {}) do pinned[pid] = true end   -- Loadout goals -> always reserved
+	local anyPin = false
 	table.sort(items, function(a, b)
+		local pa, pb = pinned[a.id] or false, pinned[b.id] or false
+		if pa ~= pb then return pa end                                  -- pinned goals sort to the top
 		if sr.sortBy == "score" then return a.score > b.score end
 		return (a.pct or 1e9) > (b.pct or 1e9) -- empty-slot upgrades (nil) sort to the top
 	end)
-	local shown = 0
+	local shown, autoStar = 0, 0
 	for i = 1, math.min(30, #items) do
 		local e = items[i]
 		local info = D.items[e.id]
 		shown = shown + 1
 		local row = SRRow(f, shown)
 		row.itemId = e.id
-		local star = (i <= count) and "|cffffd100\226\152\133|r " or "    "
+		local isPin = pinned[e.id]
+		local reserved = isPin
+		if not isPin and autoStar < count then reserved = true; autoStar = autoStar + 1 end
+		if isPin then anyPin = true end
+		local star = reserved and "|cffffd100\226\152\133|r " or "    "
+		local pinMark = isPin and "|cffffd100\226\151\134|r" or ""     -- diamond = pinned in Loadout
 		local boss = e.src:match("%-%s*(.+)$") or e.src
 		local val = (sr.sortBy == "score") and format("|cff69ccf0%.0f|r", e.score)
 			or (e.pct and format("|cff20ff20+%.0f%%|r", e.pct) or "|cff20ff20new|r")
-		row.text:SetText(format("%s|cffd6d6d6%-8s|r %s  |cff707070%s|r  %s",
-			star, SR_SLOT_SHORT[e.slot] or e.slot, Clip(info and info[1] or "?", 22), Clip(boss, 16), val))
+		row.text:SetText(format("%s%s|cffd6d6d6%-8s|r %s  |cff707070%s|r  %s",
+			star, pinMark, SR_SLOT_SHORT[e.slot] or e.slot, Clip(info and info[1] or "?", 20), Clip(boss, 16), val))
 		row:Show()
 	end
 	if shown == 0 then
 		f.footer:SetText(raid and "|cff808080no gear for your spec from this raid at that difficulty.|r"
 			or "|cff808080pick a raid from the dropdown above.|r")
+	elseif anyPin then
+		f.footer:SetText(format("|cffffd100\226\152\133|r reserve (top %d + |cffffd100\226\151\134|r Loadout pins)   \194\183   shift-click to link", count))
 	else
 		f.footer:SetText(format("|cffffd100\226\152\133|r = reserve these (your top %d)   \194\183   shift-click a row to link", count))
 	end
