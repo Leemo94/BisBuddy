@@ -3748,7 +3748,7 @@ function BisBuddyLO.Create()
 	f.listHint = f.list:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 	f.listHint:SetPoint("BOTTOMLEFT", 4, 8); f.listHint:SetJustifyH("LEFT")
 	-- control bar: the loadout is the home screen, so the other panels are reachable from here
-	local BAR = { { "Settings", "setup" }, { "Weights", "weights" }, { "Reserve", "sr" }, { "Sources", "sources" }, { "BiS Lists", "list" }, { "Talents", "talents" } }
+	local BAR = { { "Settings", "setup" }, { "Weights", "weights" }, { "Sources", "sources" }, { "Reserve", "sr" }, { "Talents", "talents" } }
 	local bx = 14
 	for _, b in ipairs(BAR) do
 		local btn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
@@ -4096,7 +4096,7 @@ SlashCmdList["BISBUDDY"] = function(msg)
 	elseif cmd == "enchants" or cmd == "enchant" then
 		ToggleEnchantsPanel()
 	elseif cmd == "gear" or cmd == "bags" then
-		ToggleGearPanel()
+		BisBuddyLO.Toggle()               -- gear retired; the Loadout replaces it
 	elseif cmd == "loadout" or cmd == "lo" then
 		BisBuddyLO.Toggle()
 	elseif cmd == "sr" or cmd == "reserve" or cmd == "reserves" then
@@ -4316,7 +4316,7 @@ SlashCmdList["BISBUDDY"] = function(msg)
 			IsSpecCustom() and "|cffcc66ffcustom|r" or "bisbeard"))
 		Print(format("alerts %s (top-%d or >=%g%% upgrade), tooltip %s",
 			db.alerts and "ON" or "OFF", db.threshold, db.minUpgradePct, db.tooltip and "ON" or "OFF"))
-		Print("|cffffd100/bb|r opens the panel. commands: gear | sr | loot | list | enchants | talents [raid|dungeon] | phase | diff | sources | pvp on|off | crafted show|hide | weights | weight <stat> <val> | import | export | top <slot> | threshold <n> | minup <pct> | alerts | tooltip | caps | lockoh [off] | extra [save|list|clear] | spec | rescan | debug")
+		Print("|cffffd100/bb|r opens the Loadout. commands: setup | sr | loot | enchants | talents [raid|dungeon] | phase | diff | sources | pvp on|off | crafted show|hide | weights | weight <stat> <val> | import | export | top <slot> | threshold <n> | minup <pct> | alerts | tooltip | caps | lockoh [off] | extra [save|list|clear] | spec | rescan | debug")
 	end
 end
 
@@ -4413,8 +4413,10 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
 	elseif event == "PLAYER_EQUIPMENT_CHANGED" or (event == "UNIT_INVENTORY_CHANGED" and arg1 == "player") then
 		wipe(equippedScoreCache)
 		if RenderGear then RenderGear() end
+		if BisBuddyLO and BisBuddyLO.Render then BisBuddyLO.Render() end   -- keep the Loadout live
 	elseif event == "BAG_UPDATE" then
 		if RenderGear then RenderGear() end
+		if BisBuddyLO and BisBuddyLO.Render then BisBuddyLO.Render() end   -- keep the Loadout live
 	elseif event == "CHARACTER_POINTS_CHANGED" or event == "PLAYER_TALENT_UPDATE" or event == "ACTIVE_TALENT_GROUP_CHANGED" then
 		specCheckedAt = 0
 	elseif event == "START_LOOT_ROLL" then
