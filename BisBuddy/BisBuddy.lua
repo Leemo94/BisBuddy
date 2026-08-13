@@ -3426,10 +3426,17 @@ end
 -- All ranked items to list for a display slot, unioning weapon / off-hand variants
 -- (the Off Hand cell must list shields + held-in-off-hand, which live under other slot keys).
 function BisBuddyLO.MergedRanks(bslot)
+	local view = BisBuddyLO.weaponView
 	local cands
-	if bslot == "Main Hand" then cands = { "Main Hand", "One-Hand", "Two-Hand" }
-	elseif bslot == "Off Hand" then cands = { "Off Hand", "One-Hand", "Held In Off-hand", "Shield" }
-	else return activeSlotRanks[bslot] end
+	if bslot == "Main Hand" then
+		if view == "2h" then cands = { "Two-Hand" }                       -- 2H view: only 2-handers
+		elseif view == "1h" then cands = { "Main Hand", "One-Hand" }      -- 1H+OH view: no 2-handers
+		else cands = { "Main Hand", "One-Hand", "Two-Hand" } end          -- auto: everything
+	elseif bslot == "Off Hand" then
+		if view == "2h" then cands = {} else cands = { "Off Hand", "One-Hand", "Held In Off-hand", "Shield" } end
+	else
+		return activeSlotRanks[bslot]
+	end
 	local merged = {}
 	for _, s in ipairs(cands) do
 		local l = activeSlotRanks[s]
@@ -3962,6 +3969,7 @@ function BisBuddyLO.Render()
 	local e2, b2 = BisBuddyLO.RenderCol(f.rightCol, BisBuddyLO.RIGHT, bagIds, bagByName)
 	f.header:SetText(format("|cffffd100%s|r  \226\128\148  Current |cff35c94a%d|r  /  BiS |cffffd100%d|r",
 		(strmatch(specKey, "|(.+)$") or specKey), math.floor(e1 + e2 + 0.5), math.floor(b1 + b2 + 0.5)))
+	if f.phaseDD then f.phaseDD:SetText("Phase: " .. db.phase) end
 	if f.raidDD then f.raidDD:SetText("Raid: " .. DiffLabel(db.raidDiff)) end
 	if f.mplusDD then f.mplusDD:SetText("M+: " .. DiffLabel(db.mplusDiff)) end
 	if f.wpnBtn then   -- weapon-view toggle: only when the spec has BOTH a 2H and a 1H/off-hand option
@@ -4016,13 +4024,19 @@ function BisBuddyLO.Create()
 	end)
 	f.wpnInfo = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")   -- 2H vs 1H+OH weapon totals, at a glance
 	f.wpnInfo:SetPoint("RIGHT", f.wpnBtn, "LEFT", -8, 0); f.wpnInfo:SetJustifyH("RIGHT")
-	-- difficulty dropdowns (re-rank live via SetDiff -> BuildRankIndex)
-	f.raidDD = MakeDropdown(f, "BisBuddyLoRaidDD", 118)
-	f.raidDD:SetPoint("TOPLEFT", 322, -35)
+	-- phase + difficulty dropdowns (re-rank live via SetPhase/SetDiff -> BuildRankIndex).
+	-- Phase matters: M+10 dungeon gear is tagged phase 2, so at Phase 1 it's gated out.
+	f.phaseDD = MakeDropdown(f, "BisBuddyLoPhaseDD", 96)
+	f.phaseDD:SetPoint("TOPLEFT", 250, -35)
+	f.phaseDD:SetBuilder(function(add)
+		for n = 1, (D.maxPhase or 5) do add(n .. " - " .. PhaseLabel(n), function() SetPhase(n, true) end, db.phase == n) end
+	end)
+	f.raidDD = MakeDropdown(f, "BisBuddyLoRaidDD", 112)
+	f.raidDD:SetPoint("LEFT", f.phaseDD, "RIGHT", 6, 0)
 	f.raidDD:SetBuilder(function(add)
 		for _, n in ipairs({ 1, 2, 3, 4 }) do add(DiffLabel(n), function() SetDiff("raid", n, true) end, db.raidDiff == n) end
 	end)
-	f.mplusDD = MakeDropdown(f, "BisBuddyLoMplusDD", 118)
+	f.mplusDD = MakeDropdown(f, "BisBuddyLoMplusDD", 112)
 	f.mplusDD:SetPoint("LEFT", f.raidDD, "RIGHT", 6, 0)
 	f.mplusDD:SetBuilder(function(add)   -- dungeon tiers: Normal/Heroic/Mythic/M+10 (no Ascended)
 		for _, n in ipairs({ 1, 2, 3, 5 }) do add(DiffLabel(n), function() SetDiff("mplus", n, true) end, db.mplusDiff == n) end
