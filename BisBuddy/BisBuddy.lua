@@ -3708,7 +3708,7 @@ function BisBuddyLO.ShowList(bslot, iv)
 			end
 		end
 	end
-	if f.listHint then f.listHint:SetText("|cff35c94a\226\151\143|r worn  |cffe0a422\226\151\134|r bags  \194\183  click = goal  \194\183  R-click = versions") end
+	if f.listHint then f.listHint:SetText("|cff35c94a\226\151\143|r worn |cffe0a422\226\151\134|r bags \194\183 click=goal \194\183 R-click=vers \194\183 ctrl=preview") end
 	if #order == 0 then f.listTitle:SetText((f.listTitle:GetText() or "") .. "  |cff808080(no items)|r") end
 end
 
@@ -3854,8 +3854,16 @@ function BisBuddyLO.Render()
 			local v = BisBuddyLO.weaponView
 			f.wpnBtn:SetText(v == "2h" and "Weapons: 2H" or (v == "1h" and "Weapons: 1H+OH") or "Weapons: Auto")
 			f.wpnBtn:Show()
+			-- show both setup totals so 1H+OH vs 2H is a direct read, not a toggle-and-remember
+			local function tsc(s) local l = activeSlotRanks[s]; return (l and l[1]) and l[1][2] or 0 end
+			local th = tsc("Two-Hand")
+			local combo = math.max(tsc("Main Hand"), tsc("One-Hand")) + math.max(tsc("Off Hand"), tsc("Held In Off-hand"), tsc("Shield"))
+			local a2 = (th >= combo) and "|cffffd100" or "|cff8f8f96"
+			local a1 = (combo > th) and "|cffffd100" or "|cff8f8f96"
+			f.wpnInfo:SetText(format("2H %s%d|r  \194\183  1H+OH %s%d|r", a2, math.floor(th + 0.5), a1, math.floor(combo + 0.5)))
+			f.wpnInfo:Show()
 		else
-			f.wpnBtn:Hide()
+			f.wpnBtn:Hide(); if f.wpnInfo then f.wpnInfo:Hide() end
 		end
 	end
 	if BisBuddyLO.sel then BisBuddyLO.ShowList(BisBuddyLO.sel, BisBuddyLO.selIv) end   -- keep the open slot list fresh
@@ -3888,6 +3896,8 @@ function BisBuddyLO.Create()
 		BisBuddyLO.weaponView = (v == nil and "2h") or (v == "2h" and "1h") or nil   -- Auto -> 2H -> 1H+OH -> Auto
 		BisBuddyLO.Render()
 	end)
+	f.wpnInfo = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")   -- 2H vs 1H+OH weapon totals, at a glance
+	f.wpnInfo:SetPoint("RIGHT", f.wpnBtn, "LEFT", -8, 0); f.wpnInfo:SetJustifyH("RIGHT")
 	f.leftCol = CreateFrame("Frame", nil, f); f.leftCol:SetPoint("TOPLEFT", 14, -64); f.leftCol:SetWidth(300); f.leftCol:SetHeight(390)
 	f.rightCol = CreateFrame("Frame", nil, f); f.rightCol:SetPoint("TOPRIGHT", -14, -64); f.rightCol:SetWidth(300); f.rightCol:SetHeight(390)
 	f.center = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -3952,7 +3962,7 @@ end
 function BisBuddyLO.Toggle()
 	RefreshSpec(true)
 	local f = BisBuddyLO.Create()
-	if f:IsShown() then f:Hide() else PlacePanel(f, true); f:Show(); BisBuddyLO.Render() end
+	if f:IsShown() then f:Hide() else PlacePanel(f, true); f:Show(); BisBuddyLO.CenterMode("home"); BisBuddyLO.Render() end
 end
 
 --------------------------------------------------------------------------------
