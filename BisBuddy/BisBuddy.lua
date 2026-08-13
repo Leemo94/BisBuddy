@@ -3483,6 +3483,8 @@ function BisBuddyLO.RichVer(info)
 	if ver == "" then return "" end
 	if cat == "worldforged" then
 		return "WF " .. (BisBuddyLO.FORGE_ABBREV[ver] or ver)
+	elseif cat == "worldboss" then
+		return (ver == "World Boss" or ver == "") and "World Boss" or (ver .. " WB")
 	elseif cat == "raid" then
 		local raid = src:match("^(.-)%s*%-") or src
 		local ab = BisBuddyLO.RAID_ABBREV[raid] or BisBuddyLO.RAID_ABBREV[ver]
@@ -3545,7 +3547,9 @@ function BisBuddyLO.RenderCol(col, idxList, bagIds, bagByName)
 		local rc = BisBuddyLO.COL[status]
 		cell.bar:SetTexture(rc[1], rc[2], rc[3])
 		if tid then
-			cell.icon:SetTexture(select(10, GetItemInfo(tid)) or "Interface\\Icons\\INV_Misc_QuestionMark")
+			local ic = select(10, GetItemInfo(tid))
+			if not ic then BisBuddyLO._uncached = true end   -- icon not cached yet -> re-render shortly
+			cell.icon:SetTexture(ic or "Interface\\Icons\\INV_Misc_QuestionMark")
 			local goal = (manual and tid == manual) and "|cffffd100\226\152\133|r " or ""   -- your pinned goal
 			cell.nmFS:SetText(goal .. "|cffa335ee" .. Clip(tname or ("item " .. tid), 38) .. "|r")
 		else
@@ -3668,6 +3672,23 @@ function BisBuddyLO.ShowList(bslot, iv)
 	if #order == 0 then f.listTitle:SetText((f.listTitle:GetText() or "") .. "  |cff808080(no items)|r") end
 end
 
+-- Item icons/quality arrive asynchronously; when a target isn't cached yet (common right after
+-- switching to a difficulty tier you've never inspected), re-render once it lands. Bounded.
+function BisBuddyLO.ArmRetry()
+	local rf = BisBuddyLO.retryFrame
+	if not rf then
+		rf = CreateFrame("Frame")
+		rf.t = 0
+		rf:SetScript("OnUpdate", function(self, e)
+			self.t = self.t + (e or 0)
+			if self.t >= 0.5 then self:Hide(); self.t = 0; BisBuddyLO.Render() end
+		end)
+		BisBuddyLO.retryFrame = rf
+	end
+	rf.t = 0
+	rf:Show()
+end
+
 function BisBuddyLO.Render()
 	local f = BisBuddyLO.panel
 	if not f or not f:IsShown() then return end
@@ -3676,6 +3697,7 @@ function BisBuddyLO.Render()
 		return
 	end
 	wipe(equippedScoreCache)
+	BisBuddyLO._uncached = false
 	local bagIds, bagByName = {}, {}
 	for bag = 0, 4 do
 		for s = 1, (GetContainerNumSlots(bag) or 0) do
@@ -3693,6 +3715,12 @@ function BisBuddyLO.Render()
 	f.header:SetText(format("|cffffd100%s|r  \226\128\148  Current |cff35c94a%d|r  /  BiS |cffffd100%d|r",
 		(strmatch(specKey, "|(.+)$") or specKey), math.floor(e1 + e2 + 0.5), math.floor(b1 + b2 + 0.5)))
 	if BisBuddyLO.sel then BisBuddyLO.ShowList(BisBuddyLO.sel, BisBuddyLO.selIv) end   -- keep the open slot list fresh
+	if BisBuddyLO._uncached and (BisBuddyLO._retries or 0) < 10 then
+		BisBuddyLO._retries = (BisBuddyLO._retries or 0) + 1
+		BisBuddyLO.ArmRetry()          -- some icons weren't cached yet; re-render shortly
+	else
+		BisBuddyLO._retries = 0
+	end
 end
 
 function BisBuddyLO.Create()
