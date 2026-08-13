@@ -3413,6 +3413,34 @@ function BisBuddyLO.TargetFor(bslot, excludeName)
 	return nil, 0
 end
 
+-- The difficulty / keystone tier off an item's tooltip (line 2 reads e.g. "Mythic 4").
+-- bisbeard only itemizes M+10, so equipped M+4/M+6 etc. aren't in D.items - read it live.
+-- Cached per item id (tier never changes for a given id).
+BisBuddyLO.tierCache = {}
+function BisBuddyLO.TierOf(link)
+	local id = link and ItemIdFromLink(link)
+	if not id then return nil end
+	local c = BisBuddyLO.tierCache[id]
+	if c ~= nil then return c or nil end
+	scanTip:SetOwner(UIParent, "ANCHOR_NONE"); scanTip:ClearLines(); scanTip:SetHyperlink(link)
+	local tier
+	for i = 2, math.min(6, scanTip:NumLines()) do
+		local fs = _G["BisBuddyScanTooltipTextLeft" .. i]
+		local t = fs and fs:GetText()
+		if t then
+			local m = strmatch(t, "^Mythic%s+(%d+)")
+			if m then tier = "M+" .. m; break end
+			if t == "Heroic" or t == "Normal" or t == "Mythic"
+				or strmatch(t, "^Ascended") or strmatch(t, "^Bloodforged") or strmatch(t, "^Worldforged") then
+				tier = t; break
+			end
+		end
+	end
+	scanTip:Hide()
+	BisBuddyLO.tierCache[id] = tier or false
+	return tier
+end
+
 function BisBuddyLO.Cell(col, idx)
 	col.cells = col.cells or {}
 	if col.cells[idx] then return col.cells[idx] end
@@ -3465,18 +3493,20 @@ function BisBuddyLO.RenderCol(col, idxList, bagIds, bagByName)
 		end
 		local delta = math.floor((tscore - (eqScore or 0)) + 0.5)
 		local en = (eqId and D.items[eqId] and D.items[eqId][1]) or (eqLink and GetItemInfo(eqLink)) or "your item"
+		local tier = eqLink and BisBuddyLO.TierOf(eqLink)
+		local tstr = tier and (" |cff888888(" .. tier .. ")|r") or ""
 		local line
 		if used2H then
 			line = "|cff808080covered by your 2-handed BiS|r"
 		elseif status == "none" then
-			line = eqLink and format("|cff808080Current %s (no BiS data)|r", Clip(en, 22)) or ("|cff808080" .. label .. " \226\128\148 no BiS data|r")
+			line = eqLink and ("|cff808080Current " .. Clip(en, 20) .. (tier and (" (" .. tier .. ")") or "") .. " (no BiS data)|r") or ("|cff808080" .. label .. " \226\128\148 no BiS data|r")
 		elseif status == "equipped" then
 			line = "|cff35c94a\226\156\147 equipped (BiS)|r"
 		elseif status == "bags" then
 			line = "|cffe0a422BiS is in your bags \226\128\148 equip it|r"
 		elseif eqLink then
 			local hex = (status == "close") and "e8722c" or "c8443c"
-			line = format("|cff%sCurrent %s. Upgrade +%d|r", hex, Clip(en, 22), delta)
+			line = format("|cff%sCurrent %s|r%s |cff%sUpgrade +%d|r", hex, Clip(en, 20), tstr, hex, delta)
 		elseif ownAny then
 			line = format("|cffe8722chave the %s in bags. Upgrade +%d|r", (alt.ver ~= "" and alt.ver) or "another", delta)
 		else
@@ -3519,8 +3549,14 @@ function BisBuddyLO.ShowList(bslot, iv)
 	f.list:Show()
 	local eqLink = iv and GetInventoryItemLink("player", iv)
 	local eqName = eqLink and GetItemInfo(eqLink)
-	f.listTitle:SetText(format("|cffffd100%s|r%s", (BROWSE_SLOT_LABEL[bslot] or bslot),
-		eqName and ("  |cff808080now: " .. Clip(eqName, 18) .. "|r") or ""))
+	local eqScore = eqLink and ScoreLink(eqLink)
+	local eqTier = eqLink and BisBuddyLO.TierOf(eqLink)
+	local now = ""
+	if eqName then
+		now = format("  |cff808080now:|r %s%s  |cff69ccf0%d|r", Clip(eqName, 16),
+			eqTier and (" |cff888888" .. eqTier .. "|r") or "", math.floor((eqScore or 0) + 0.5))
+	end
+	f.listTitle:SetText(format("|cffffd100%s|r%s", (BROWSE_SLOT_LABEL[bslot] or bslot), now))
 	local list = activeSlotRanks[bslot]
 	local base = BaselineForSlot(bslot)
 	local seenName, order = {}, {}                          -- best variant per item name (score-sorted list)
