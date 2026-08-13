@@ -4094,7 +4094,7 @@ function BisBuddyLO.Create()
 	f.listTitle = f.list:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 	f.listTitle:SetPoint("TOPLEFT", 4, -2); f.listTitle:SetPoint("RIGHT", -4, 0); f.listTitle:SetJustifyH("LEFT")
 	f.listNote = f.list:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")   -- weapon-view guidance
-	f.listNote:SetPoint("TOPLEFT", 5, -19); f.listNote:SetPoint("RIGHT", -5, 0); f.listNote:SetJustifyH("LEFT")
+	f.listNote:SetPoint("TOPLEFT", 6, -19); f.listNote:SetWidth(274); f.listNote:SetJustifyH("LEFT")   -- SetWidth => wraps to multiple lines
 	f.listHint = f.list:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 	f.listHint:SetPoint("BOTTOMLEFT", 4, 8); f.listHint:SetJustifyH("LEFT")
 
