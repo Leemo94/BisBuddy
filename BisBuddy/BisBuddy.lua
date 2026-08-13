@@ -3426,6 +3426,10 @@ function BisBuddyLO.Cell(col, idx)
 	local hl = c:CreateTexture(nil, "HIGHLIGHT"); hl:SetAllPoints(); hl:SetTexture(1, 1, 1, 0.06)
 	c:SetScript("OnEnter", function(self) if self.itemId then GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:SetHyperlink("item:" .. self.itemId); GameTooltip:Show() end end)
 	c:SetScript("OnLeave", function() GameTooltip:Hide() end)
+	c:SetScript("OnClick", function(self)
+		if not self.bslot then return end
+		if BisBuddyLO.sel == self.bslot then BisBuddyLO.HideList() else BisBuddyLO.ShowList(self.bslot, self.iv) end
+	end)
 	col.cells[idx] = c
 	return c
 end
@@ -3449,6 +3453,7 @@ function BisBuddyLO.RenderCol(col, idxList, bagIds, bagByName)
 		local status = used2H and "none" or BisBuddyLO.Classify(eqId, tid, ownExact, ownAny, eqRank, false)
 		local cell = BisBuddyLO.Cell(col, pos)
 		cell.itemId = tid or eqId
+		cell.bslot, cell.iv = bslot, iv
 		local rc = BisBuddyLO.COL[status]
 		cell.bar:SetTexture(rc[1], rc[2], rc[3])
 		if tid then
@@ -3484,6 +3489,65 @@ function BisBuddyLO.RenderCol(col, idxList, bagIds, bagByName)
 	return sumEq, sumBis
 end
 
+-- Center item list (click a slot -> its ranked items). Mirrors the Browse panel's
+-- name-grouping (best variant per item), compacted to fit the loadout's middle column.
+function BisBuddyLO.ListRow(i)
+	local f = BisBuddyLO.panel
+	f.listRows = f.listRows or {}
+	if f.listRows[i] then return f.listRows[i] end
+	local r = CreateFrame("Button", nil, f.list)
+	r:SetHeight(16); r:SetPoint("TOPLEFT", 2, -24 - (i - 1) * 17); r:SetPoint("RIGHT", f.list, "RIGHT", -2, 0)
+	local hl = r:CreateTexture(nil, "HIGHLIGHT"); hl:SetAllPoints(); hl:SetTexture(1, 1, 1, 0.10)
+	r.text = r:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); r.text:SetPoint("LEFT", 2, 0); r.text:SetJustifyH("LEFT")
+	r:SetScript("OnEnter", function(self) if self.itemId then GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:SetHyperlink("item:" .. self.itemId); GameTooltip:Show() end end)
+	r:SetScript("OnLeave", function() GameTooltip:Hide() end)
+	f.listRows[i] = r
+	return r
+end
+
+function BisBuddyLO.HideList()
+	BisBuddyLO.sel, BisBuddyLO.selIv = nil, nil
+	local f = BisBuddyLO.panel
+	if f then if f.list then f.list:Hide() end; if f.center then f.center:Show() end end
+end
+
+function BisBuddyLO.ShowList(bslot, iv)
+	local f = BisBuddyLO.panel
+	if not (f and f.list) then return end
+	BisBuddyLO.sel, BisBuddyLO.selIv = bslot, iv
+	if f.center then f.center:Hide() end
+	f.list:Show()
+	local eqLink = iv and GetInventoryItemLink("player", iv)
+	local eqName = eqLink and GetItemInfo(eqLink)
+	f.listTitle:SetText(format("|cffffd100%s|r%s", (BROWSE_SLOT_LABEL[bslot] or bslot),
+		eqName and ("  |cff808080now: " .. Clip(eqName, 18) .. "|r") or ""))
+	local list = activeSlotRanks[bslot]
+	local base = BaselineForSlot(bslot)
+	local seenName, order = {}, {}                          -- best variant per item name (score-sorted list)
+	if list then
+		for i = 1, #list do
+			local id = list[i][1]
+			local info = D.items[id]
+			local nm = (info and info[1]) or ("item " .. id)
+			if not seenName[nm] and #order < 14 then
+				seenName[nm] = true
+				order[#order + 1] = { id = id, name = nm, score = list[i][2], info = info }
+			end
+		end
+	end
+	if f.listRows then for _, r in ipairs(f.listRows) do r:Hide() end end
+	for i = 1, #order do
+		local g = order[i]
+		local r = BisBuddyLO.ListRow(i)
+		r.itemId = g.id
+		local up = (base and g.score > base) and "|cff20ff20^|r " or "   "
+		local ver = (g.info and g.info[2] and g.info[2] ~= "") and (" |cff888888" .. g.info[2] .. "|r") or ""
+		r.text:SetText(format("%s|cff999999%2d|r %s%s|r%s  |cff69ccf0%.0f|r", up, i, ItemHex(g.id), Clip(g.name, 20), ver, g.score))
+		r:Show()
+	end
+	if #order == 0 then f.listTitle:SetText((f.listTitle:GetText() or "") .. "  |cff808080(no items)|r") end
+end
+
 function BisBuddyLO.Render()
 	local f = BisBuddyLO.panel
 	if not f or not f:IsShown() then return end
@@ -3508,12 +3572,13 @@ function BisBuddyLO.Render()
 	local e2, b2 = BisBuddyLO.RenderCol(f.rightCol, BisBuddyLO.RIGHT, bagIds, bagByName)
 	f.header:SetText(format("|cffffd100%s|r  \226\128\148  Current |cff35c94a%d|r  /  BiS |cffffd100%d|r",
 		(strmatch(specKey, "|(.+)$") or specKey), math.floor(e1 + e2 + 0.5), math.floor(b1 + b2 + 0.5)))
+	if BisBuddyLO.sel then BisBuddyLO.ShowList(BisBuddyLO.sel, BisBuddyLO.selIv) end   -- keep the open slot list fresh
 end
 
 function BisBuddyLO.Create()
 	if BisBuddyLO.panel then return BisBuddyLO.panel end
 	local f = CreateFrame("Frame", "BisBuddyLoadoutFrame", UIParent)
-	f:SetWidth(784); f:SetHeight(470); f:SetPoint("CENTER"); f:SetFrameStrata("DIALOG")
+	f:SetWidth(880); f:SetHeight(470); f:SetPoint("CENTER"); f:SetFrameStrata("DIALOG")
 	StyleDialog(f)
 	f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
 	f:SetScript("OnDragStart", f.StartMoving)
@@ -3524,11 +3589,14 @@ function BisBuddyLO.Create()
 	local close = CreateFrame("Button", nil, f, "UIPanelCloseButton"); close:SetPoint("TOPRIGHT", -6, -6)
 	f.header = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	f.header:SetPoint("TOPLEFT", 18, -40); f.header:SetJustifyH("LEFT")
-	f.leftCol = CreateFrame("Frame", nil, f); f.leftCol:SetPoint("TOPLEFT", 12, -64); f.leftCol:SetWidth(300); f.leftCol:SetHeight(390)
-	f.rightCol = CreateFrame("Frame", nil, f); f.rightCol:SetPoint("TOPRIGHT", -12, -64); f.rightCol:SetWidth(300); f.rightCol:SetHeight(390)
+	f.leftCol = CreateFrame("Frame", nil, f); f.leftCol:SetPoint("TOPLEFT", 12, -64); f.leftCol:SetWidth(280); f.leftCol:SetHeight(390)
+	f.rightCol = CreateFrame("Frame", nil, f); f.rightCol:SetPoint("TOPRIGHT", -12, -64); f.rightCol:SetWidth(280); f.rightCol:SetHeight(390)
 	f.center = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-	f.center:SetPoint("TOP", 0, -90); f.center:SetWidth(150); f.center:SetJustifyH("CENTER")
-	f.center:SetText("|cff808080Set Bonuses\n(coming)\n\nclick a slot for\nits item list|r")
+	f.center:SetPoint("TOP", 0, -150); f.center:SetWidth(260); f.center:SetJustifyH("CENTER")
+	f.center:SetText("|cff808080Set Bonuses\n(coming)\n\nclick any slot\nfor its item list|r")
+	f.list = CreateFrame("Frame", nil, f); f.list:SetPoint("TOP", 0, -58); f.list:SetWidth(288); f.list:SetHeight(400); f.list:Hide()
+	f.listTitle = f.list:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	f.listTitle:SetPoint("TOPLEFT", 4, -2); f.listTitle:SetPoint("RIGHT", -4, 0); f.listTitle:SetJustifyH("LEFT")
 	f:Hide()
 	BisBuddyLO.panel = f
 	return f
