@@ -4172,6 +4172,7 @@ function BisBuddyLO.Create()
 		{ "Weights",  function() BisBuddyLO.ShowWeights() end },
 		{ "Sources",  function() BisBuddyLO.ShowSources() end },
 		{ "Sets",     function() BisBuddyLO.ShowSets() end },
+		{ "Enchants", function() SlashCmdList["BISBUDDY"]("enchants") end },
 		{ "Reserve",  function() SlashCmdList["BISBUDDY"]("sr") end },
 		{ "Talents",  function() SlashCmdList["BISBUDDY"]("talents") end },
 	}
