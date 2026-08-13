@@ -3881,7 +3881,7 @@ function BisBuddyLO.SetRow(i)
 	if f.setRows[i] then return f.setRows[i] end
 	local sp = f.setsPanel
 	local r = CreateFrame("Button", nil, sp)
-	r:SetHeight(30); r:SetPoint("TOPLEFT", 6, -42 - (i - 1) * 33); r:SetPoint("RIGHT", sp, "RIGHT", -6, 0)
+	r:SetHeight(30); r:SetPoint("TOPLEFT", 6, -46 - (i - 1) * 33); r:SetPoint("RIGHT", sp, "RIGHT", -6, 0)
 	local hl = r:CreateTexture(nil, "HIGHLIGHT"); hl:SetAllPoints(); hl:SetTexture(1, 1, 1, 0.08)
 	r.nm = r:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); r.nm:SetPoint("TOPLEFT", 4, -2); r.nm:SetPoint("RIGHT", -4, 0); r.nm:SetJustifyH("LEFT")
 	r.bn = r:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall"); r.bn:SetPoint("TOPLEFT", 4, -15); r.bn:SetPoint("RIGHT", -4, 0); r.bn:SetJustifyH("LEFT")
@@ -3904,7 +3904,7 @@ function BisBuddyLO.ShowSets()
 	local f = BisBuddyLO.panel
 	if not (f and f.setsPanel) then return end
 	BisBuddyLO.CenterMode("sets")
-	local present, sscore = {}, {}   -- setName -> member slots present, + summed best-piece score (relevance)
+	local present, stype = {}, {}   -- setName -> member slots present + its armor type (for search)
 	for _, list in pairs(activeSlotRanks) do
 		local seen = {}
 		for _, e in ipairs(list) do
@@ -3912,16 +3912,22 @@ function BisBuddyLO.ShowSets()
 			if sn and sn ~= "" and not seen[sn] then
 				seen[sn] = true
 				present[sn] = (present[sn] or 0) + 1
-				sscore[sn] = (sscore[sn] or 0) + (e[2] or 0)
+				if not stype[sn] and it[9] then stype[sn] = it[9] end
 			end
 		end
 	end
+	local q = strlower(strtrim(BisBuddyLO.setSearch or ""))   -- filter by name / armor type / bonus text
 	local rel = {}
 	for name, cnt in pairs(present) do
 		local set = D.sets and D.sets[name]
-		if set and set.bonuses and cnt >= 3 then rel[#rel + 1] = { name = name, cnt = cnt, set = set, sc = sscore[name] or 0 } end
+		if set and set.bonuses and cnt >= 3 then
+			local hay = strlower(name .. " " .. (stype[name] or "") .. " " .. (set.bonuses["3"] or "") .. " " .. (set.bonuses["6"] or ""))
+			if q == "" or hay:find(q, 1, true) then
+				rel[#rel + 1] = { name = name, cnt = cnt, set = set }
+			end
+		end
 	end
-	table.sort(rel, function(a, b) if a.sc ~= b.sc then return a.sc > b.sc end return a.name < b.name end)   -- most relevant first
+	table.sort(rel, function(a, b) return a.name < b.name end)   -- alphabetical (easy to browse / find)
 	local cur = db.loSetTarget
 	local VIS, total = 10, #rel
 	local off = math.max(0, math.min(BisBuddyLO.setScroll or 0, math.max(0, total - VIS)))
@@ -3940,13 +3946,14 @@ function BisBuddyLO.ShowSets()
 		r:Show()
 	end
 	if total == 0 then
-		f.setsSub:SetText("|cff808080no multi-piece sets available for this spec here|r")
+		f.setsSub:SetText(q ~= "" and ("|cff808080no sets match \"" .. (BisBuddyLO.setSearch or "") .. "\"|r")
+			or "|cff808080no multi-piece sets for this spec here|r")
 	elseif cur then
-		f.setsSub:SetText(format("|cffc8a24etargeting %s (%dpc)|r \194\183 click to change / clear", Clip(cur.name, 16), cur.pieces))
+		f.setsSub:SetText(format("|cffc8a24etargeting %s (%dpc)|r \194\183 click to change/clear", Clip(cur.name, 14), cur.pieces))
 	elseif total > VIS then
-		f.setsSub:SetText(format("|cff808080%d-%d of %d \194\183 scroll for more \194\183 click to target|r", off + 1, math.min(off + VIS, total), total))
+		f.setsSub:SetText(format("|cff808080%d-%d of %d \194\183 scroll \194\183 Find by name/type/keyword|r", off + 1, math.min(off + VIS, total), total))
 	else
-		f.setsSub:SetText("|cff808080click a set to force its bonus into the loadout|r")
+		f.setsSub:SetText(format("|cff808080%d sets \194\183 click to target \194\183 Find by name/type/keyword|r", total))
 	end
 end
 
@@ -4099,7 +4106,12 @@ function BisBuddyLO.Create()
 	f.setsPanel:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
 	f.setsPanel:SetBackdropColor(0.07, 0.07, 0.094, 0.9); f.setsPanel:SetBackdropBorderColor(0.17, 0.17, 0.21, 1)
 	f.setsTitle = f.setsPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.setsTitle:SetPoint("TOPLEFT", 9, -7); f.setsTitle:SetText("|cffffd100Set Bonuses|r")
-	f.setsSub = f.setsPanel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall"); f.setsSub:SetPoint("TOPLEFT", 9, -23); f.setsSub:SetPoint("RIGHT", -8, 0); f.setsSub:SetJustifyH("LEFT")
+	f.setsSub = f.setsPanel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall"); f.setsSub:SetPoint("BOTTOMLEFT", 9, 8); f.setsSub:SetPoint("RIGHT", -8, 0); f.setsSub:SetJustifyH("LEFT")
+	local setsFind = f.setsPanel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall"); setsFind:SetPoint("TOPLEFT", 9, -25); setsFind:SetText("|cff909090Find|r")
+	f.setsSearch = CreateFrame("EditBox", "BisBuddyLoSetSearch", f.setsPanel, "InputBoxTemplate")
+	f.setsSearch:SetPoint("TOPLEFT", 44, -23); f.setsSearch:SetWidth(150); f.setsSearch:SetHeight(18); f.setsSearch:SetAutoFocus(false)
+	f.setsSearch:SetScript("OnTextChanged", function(self) BisBuddyLO.setSearch = self:GetText(); BisBuddyLO.setScroll = 0; BisBuddyLO.ShowSets() end)
+	f.setsSearch:SetScript("OnEscapePressed", function(self) self:SetText(""); self:ClearFocus() end)
 	local setsClose = CreateFrame("Button", nil, f.setsPanel, "UIPanelCloseButton"); setsClose:SetWidth(26); setsClose:SetHeight(26); setsClose:SetPoint("TOPRIGHT", 3, 4)
 	setsClose:SetScript("OnClick", function() BisBuddyLO.CenterMode("home") end)
 
